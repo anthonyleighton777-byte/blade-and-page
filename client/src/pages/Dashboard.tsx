@@ -225,6 +225,7 @@ function AddBookModal({ open, onClose }: { open: boolean; onClose: () => void })
       await apiRequest("POST", "/api/books", payload);
       queryClient.invalidateQueries({ queryKey: ["/api/books"] });
       queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/free-books"] });
       toast({ title: "Book added!", description: `"${f.title}" is now in the library.` });
       setF(blank);
       onClose();
@@ -1010,6 +1011,7 @@ function SearchOnlineModal({ open, onClose }: { open: boolean; onClose: () => vo
       });
       queryClient.invalidateQueries({ queryKey: ["/api/books"] });
       queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/free-books"] });
       setAddedKeys(prev => new Set(prev).add(key));
       toast({ title: "Book added!", description: `"${r.title}" is in your library.` });
     } catch { toast({ title: "Failed to add", variant: "destructive" }); }
@@ -1261,6 +1263,7 @@ function DashboardInner() {
         });
         queryClient.invalidateQueries({ queryKey: ["/api/books"] });
         queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/free-books"] });
         toast({ title: `✦ ${data.added.length} new group pick${data.added.length > 1 ? 's' : ''} discovered!`, description: `Added from Open Library based on the community's taste.` });
       }
     },
@@ -1276,6 +1279,7 @@ function DashboardInner() {
       }
       if (data.added && data.added.length > 0) {
         queryClient.invalidateQueries({ queryKey: ["/api/books"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/free-books"] });
         toast({ title: `✦ ${data.added.length} personal pick${data.added.length > 1 ? 's' : ''} found!`, description: `Books matched to your individual taste.` });
       }
     },
