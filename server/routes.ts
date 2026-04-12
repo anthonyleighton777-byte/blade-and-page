@@ -1260,8 +1260,28 @@ export function registerRoutes(httpServer: any, app: Express): Server {
     }).on("error", (err: any) => res.status(500).json({ error: err.message }));
   });
 
+  // ── Shared helpers for free-link checking ──
+  // Strict title+author match — NEVER fall back to a random first result
+  function olTitleAuthorMatch(doc: any, title: string, author: string): boolean {
+    const docTitle = (doc.title || "").toLowerCase();
+    const docAuthors: string[] = (doc.author_name || []).map((a: string) => a.toLowerCase());
+    const titleWords = title.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const authorWords = author.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const titleOk = titleWords.every(w => docTitle.includes(w));
+    const authorOk = authorWords.some(w => docAuthors.some(a => a.includes(w)));
+    return titleOk && authorOk;
+  }
+  function lvTitleAuthorMatch(b: any, title: string, author: string): boolean {
+    const bTitle = (b.title || "").toLowerCase();
+    const bAuthor = (b.author || "").toLowerCase();
+    const titleWords = title.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const authorWords = author.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const titleOk = titleWords.every(w => bTitle.includes(w));
+    const authorOk = authorWords.some(w => bAuthor.includes(w));
+    return titleOk && authorOk;
+  }
+
   // ── GET /api/free-books — bulk scan all books for free availability ──
-  // Throttles to 4 concurrent books to avoid hammering external APIs
   app.get("/api/free-books", (req, res) => {
     const allBooks = storage.getAllBooks();
 
@@ -1270,40 +1290,36 @@ export function registerRoutes(httpServer: any, app: Express): Server {
         const title = book.title;
         const author = book.author;
         const tags: string[] = JSON.parse(book.tags || "[]");
+        // Always include buy links so the tab shows every book
+        const buyUrl = `https://www.amazon.com/s?k=${encodeURIComponent(title + " " + author)}`;
+        const goodreadsUrl = `https://www.goodreads.com/search?q=${encodeURIComponent(title + " " + author)}`;
         const out: any = {
           id: book.id, title, author, genre: book.genre,
           coverColor: book.coverColor, coverAccent: book.coverAccent,
-          seriesName: book.seriesName,
+          seriesName: book.seriesName, buyUrl, goodreadsUrl,
           ebookUrl: null, borrowUrl: null, iaUrl: null, audioUrl: null,
           standardEbookUrl: null, webSerialUrl: null,
         };
         let pending = 4;
         const done = () => {
-          if (--pending === 0) {
-            const hasFree = out.ebookUrl || out.borrowUrl || out.iaUrl ||
-              out.audioUrl || out.standardEbookUrl || out.webSerialUrl;
-            resolve(hasFree ? out : null);
-          }
+          if (--pending === 0) resolve(out);
         };
 
-        // 1) Open Library
+        // 1) Open Library — strict title+author match only
         const olQ = encodeURIComponent(`${title} ${author}`);
-        const olUrl = `https://openlibrary.org/search.json?q=${olQ}&limit=5&fields=key,title,author_name,ia,ebook_access,lending_edition_s`;
+        const olUrl = `https://openlibrary.org/search.json?q=${olQ}&limit=10&fields=key,title,author_name,ia,ebook_access,lending_edition_s`;
         https.get(olUrl, { headers: { "User-Agent": "BladeAndPage/1.0" } }, (r) => {
           let d = "";
           r.on("data", c => d += c);
           r.on("end", () => {
             try {
-              const json = JSON.parse(d);
-              const docs = json.docs || [];
-              const match = docs.find((doc: any) =>
-                (doc.title || "").toLowerCase().includes(title.toLowerCase().slice(0, 15))
-              ) || docs[0];
+              const docs = (JSON.parse(d).docs || []) as any[];
+              const match = docs.find(doc => olTitleAuthorMatch(doc, title, author));
               if (match) {
                 const access = match.ebook_access || "";
                 if (access === "public") {
                   const ia = match.ia?.[0];
-                  out.ebookUrl = ia ? `https://archive.org/embed/${ia}` : `https://openlibrary.org${match.key}`;
+                  out.ebookUrl = ia ? `https://archive.org/details/${ia}` : `https://openlibrary.org${match.key}`;
                 } else if (access === "borrowable" || match.lending_edition_s) {
                   out.borrowUrl = `https://openlibrary.org${match.key}`;
                 }
@@ -1316,26 +1332,23 @@ export function registerRoutes(httpServer: any, app: Express): Server {
           });
         }).on("error", () => done());
 
-        // 2) LibriVox
+        // 2) LibriVox — strict title+author match
         const lvQ = encodeURIComponent(title);
-        const lvUrl = `https://librivox.org/api/feed/audiobooks?title=${lvQ}&format=json&extended=1&limit=3`;
+        const lvUrl = `https://librivox.org/api/feed/audiobooks?title=${lvQ}&format=json&extended=1&limit=5`;
         https.get(lvUrl, { headers: { "User-Agent": "BladeAndPage/1.0" } }, (r) => {
           let d = "";
           r.on("data", c => d += c);
           r.on("end", () => {
             try {
-              const json = JSON.parse(d);
-              const books = json.books || [];
-              const match = books.find((b: any) =>
-                (b.title || "").toLowerCase().includes(title.toLowerCase().slice(0, 12))
-              );
+              const books = (JSON.parse(d).books || []) as any[];
+              const match = books.find(b => lvTitleAuthorMatch(b, title, author));
               if (match) out.audioUrl = match.url_librivox || `https://librivox.org/${match.id}`;
             } catch { }
             done();
           });
         }).on("error", () => done());
 
-        // 3) Standard Ebooks
+        // 3) Standard Ebooks — deterministic URL, 200 = exists
         const seAuthorSlug = author.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
         const seTitleSlug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
         const seUrl = `https://standardebooks.org/ebooks/${seAuthorSlug}/${seTitleSlug}`;
@@ -1345,55 +1358,22 @@ export function registerRoutes(httpServer: any, app: Express): Server {
           r.on("end", () => done());
         }).on("error", () => done());
 
-        // 4) Royal Road — web serial search (title slug on royalroad.com)
-        //    Also handles books already tagged "web-serial" pointing to Royal Road
-        const rrQ = encodeURIComponent(`${title} ${author}`);
-        const rrSearchUrl = `https://www.royalroad.com/fictions/search?title=${encodeURIComponent(title)}&orderBy=best_result&count=5`;
-        https.get(rrSearchUrl, { headers: { "User-Agent": "BladeAndPage/1.0" } }, (r) => {
-          let d = "";
-          r.on("data", c => d += c);
-          r.on("end", () => {
-            try {
-              // Royal Road search results contain fiction titles in the HTML
-              const titleLower = title.toLowerCase();
-              // Look for a fiction link matching the title
-              const match = d.match(/href="\/fiction\/\d+\/([^"]+)"[^>]*>[^<]*<\/a>/gi);
-              if (match) {
-                for (const m of match) {
-                  const slugMatch = m.match(/href="(\/fiction\/\d+\/[^"]+)"/);
-                  const labelMatch = m.match(/>([^<]+)<\/a>/);
-                  if (slugMatch && labelMatch) {
-                    const label = labelMatch[1].trim().toLowerCase();
-                    if (label.includes(titleLower.slice(0, 10)) || titleLower.includes(label.slice(0, 10))) {
-                      out.webSerialUrl = `https://www.royalroad.com${slugMatch[1]}`;
-                      break;
-                    }
-                  }
-                }
-              }
-            } catch { }
-            // Also mark as web serial if already tagged
-            if (!out.webSerialUrl && tags.includes("web-serial")) {
-              out.webSerialUrl = `https://www.royalroad.com/fictions/search?title=${encodeURIComponent(title)}`;
-            }
-            done();
-          });
-        }).on("error", () => {
-          if (tags.includes("web-serial")) {
-            out.webSerialUrl = `https://www.royalroad.com/fictions/search?title=${encodeURIComponent(title)}`;
-          }
-          done();
-        });
+        // 4) Royal Road — only for books tagged web-serial
+        if (tags.includes("web-serial")) {
+          out.webSerialUrl = `https://www.royalroad.com/fictions/search?title=${encodeURIComponent(title)}`;
+          done(); // counts as one pending slot resolved
+        } else {
+          done(); // skip, still decrement
+        }
       });
     }
 
-    // Process in batches of 5 to avoid hammering external APIs
     async function runBatched() {
       const results: any[] = [];
       for (let i = 0; i < allBooks.length; i += 5) {
         const batch = allBooks.slice(i, i + 5);
         const batchResults = await Promise.all(batch.map(checkBook));
-        results.push(...batchResults.filter(Boolean));
+        results.push(...batchResults);
       }
       res.json(results);
     }
@@ -1407,37 +1387,32 @@ export function registerRoutes(httpServer: any, app: Express): Server {
 
     const title = book.title;
     const author = book.author;
-    const results: any = { ebookUrl: null, borrowUrl: null, audioUrl: null, standardEbookUrl: null };
+    const results: any = {
+      ebookUrl: null, borrowUrl: null, iaUrl: null, audioUrl: null, standardEbookUrl: null,
+      buyUrl: `https://www.amazon.com/s?k=${encodeURIComponent(title + " " + author)}`,
+      goodreadsUrl: `https://www.goodreads.com/search?q=${encodeURIComponent(title + " " + author)}`,
+    };
     let pending = 3;
     const done = () => { if (--pending === 0) res.json(results); };
 
-    // 1) Open Library — search for this exact title+author, check availability
+    // 1) Open Library — strict title+author match, no fallback to random result
     const olQ = encodeURIComponent(`${title} ${author}`);
-    const olUrl = `https://openlibrary.org/search.json?q=${olQ}&limit=5&fields=key,title,author_name,ia,ebook_access,lending_edition_s`;
+    const olUrl = `https://openlibrary.org/search.json?q=${olQ}&limit=10&fields=key,title,author_name,ia,ebook_access,lending_edition_s`;
     https.get(olUrl, { headers: { "User-Agent": "BladeAndPage/1.0" } }, (r) => {
       let d = "";
       r.on("data", c => d += c);
       r.on("end", () => {
         try {
-          const json = JSON.parse(d);
-          const docs = json.docs || [];
-          // Find best match (title contains our title)
-          const match = docs.find((doc: any) =>
-            (doc.title || "").toLowerCase().includes(title.toLowerCase().slice(0, 15))
-          ) || docs[0];
+          const docs = (JSON.parse(d).docs || []) as any[];
+          const match = docs.find(doc => olTitleAuthorMatch(doc, title, author));
           if (match) {
             const access = match.ebook_access || "";
             if (access === "public") {
-              // Freely readable on Open Library
               const ia = match.ia?.[0];
-              results.ebookUrl = ia
-                ? `https://archive.org/embed/${ia}`
-                : `https://openlibrary.org${match.key}`;
+              results.ebookUrl = ia ? `https://archive.org/details/${ia}` : `https://openlibrary.org${match.key}`;
             } else if (access === "borrowable" || match.lending_edition_s) {
-              // Can borrow for free (1-hour loan)
               results.borrowUrl = `https://openlibrary.org${match.key}`;
             }
-            // Also check Internet Archive directly
             if (!results.ebookUrl && match.ia?.[0]) {
               results.iaUrl = `https://archive.org/details/${match.ia[0]}`;
             }
@@ -1447,38 +1422,28 @@ export function registerRoutes(httpServer: any, app: Express): Server {
       });
     }).on("error", () => done());
 
-    // 2) LibriVox — free public domain audiobooks
+    // 2) LibriVox — strict title+author match
     const lvQ = encodeURIComponent(title);
-    const lvUrl = `https://librivox.org/api/feed/audiobooks?title=${lvQ}&format=json&extended=1&limit=3`;
+    const lvUrl = `https://librivox.org/api/feed/audiobooks?title=${lvQ}&format=json&extended=1&limit=5`;
     https.get(lvUrl, { headers: { "User-Agent": "BladeAndPage/1.0" } }, (r) => {
       let d = "";
       r.on("data", c => d += c);
       r.on("end", () => {
         try {
-          const json = JSON.parse(d);
-          const books = json.books || [];
-          const match = books.find((b: any) =>
-            (b.title || "").toLowerCase().includes(title.toLowerCase().slice(0, 12))
-          );
-          if (match) {
-            results.audioUrl = match.url_librivox || `https://librivox.org/${match.id}`;
-          }
+          const books = (JSON.parse(d).books || []) as any[];
+          const match = books.find((b: any) => lvTitleAuthorMatch(b, title, author));
+          if (match) results.audioUrl = match.url_librivox || `https://librivox.org/${match.id}`;
         } catch { }
         done();
       });
     }).on("error", () => done());
 
-    // 3) Standard Ebooks — high-quality, beautifully formatted public domain ebooks
-    // Standard Ebooks uses slug format: author-name/title-slug on their catalog page
+    // 3) Standard Ebooks — deterministic URL, 200 = confirmed match
     const seAuthorSlug = author.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const seTitleSlug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const seUrl = `https://standardebooks.org/ebooks/${seAuthorSlug}/${seTitleSlug}`;
     https.get(seUrl, { headers: { "User-Agent": "BladeAndPage/1.0" } }, (r) => {
-      // Standard Ebooks returns 200 if the book exists, 404 if not
-      if (r.statusCode === 200) {
-        results.standardEbookUrl = seUrl;
-      }
-      // Drain response
+      if (r.statusCode === 200) results.standardEbookUrl = seUrl;
       r.resume();
       r.on("end", () => done());
     }).on("error", () => done());

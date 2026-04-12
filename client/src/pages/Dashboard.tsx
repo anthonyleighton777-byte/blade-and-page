@@ -511,62 +511,81 @@ interface FreeBookEntry {
   coverColor: string; coverAccent: string; seriesName: string | null;
   ebookUrl: string | null; borrowUrl: string | null; iaUrl: string | null;
   audioUrl: string | null; standardEbookUrl: string | null; webSerialUrl: string | null;
+  buyUrl: string; goodreadsUrl: string;
 }
 
-const SOURCE_LABELS: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  ebookUrl:        { label: "Free Ebook",        color: "text-amber-400 bg-amber-900/20 border-amber-700/30",   icon: <BookOpen size={10} /> },
-  standardEbookUrl:{ label: "Standard Ebooks",   color: "text-emerald-400 bg-emerald-900/20 border-emerald-700/30", icon: <Download size={10} /> },
-  borrowUrl:       { label: "Borrow (1 hr)",      color: "text-yellow-400 bg-yellow-900/20 border-yellow-700/30",  icon: <BookOpen size={10} /> },
-  iaUrl:           { label: "Archive.org",        color: "text-blue-400 bg-blue-900/20 border-blue-700/30",       icon: <Globe size={10} /> },
-  audioUrl:        { label: "Audiobook",          color: "text-purple-400 bg-purple-900/20 border-purple-700/30", icon: <Headphones size={10} /> },
-  webSerialUrl:    { label: "Web Serial",         color: "text-cyan-400 bg-cyan-900/20 border-cyan-700/30",       icon: <Rss size={10} /> },
-};
+const FREE_SOURCE_DEFS: { key: keyof FreeBookEntry; label: string; color: string; icon: React.ReactNode }[] = [
+  { key: "ebookUrl",         label: "Read Free",        color: "text-emerald-300 bg-emerald-900/30 border-emerald-600/50",   icon: <BookOpen size={11} /> },
+  { key: "standardEbookUrl", label: "Standard Ebooks",  color: "text-emerald-300 bg-emerald-900/30 border-emerald-600/50",   icon: <Download size={11} /> },
+  { key: "borrowUrl",        label: "Borrow Free",      color: "text-emerald-300 bg-emerald-900/30 border-emerald-600/50",   icon: <BookOpen size={11} /> },
+  { key: "iaUrl",            label: "Archive.org",      color: "text-emerald-300 bg-emerald-900/30 border-emerald-600/50",   icon: <Globe size={11} /> },
+  { key: "audioUrl",         label: "Free Audiobook",   color: "text-emerald-300 bg-emerald-900/30 border-emerald-600/50",   icon: <Headphones size={11} /> },
+  { key: "webSerialUrl",     label: "Read Web Serial",  color: "text-emerald-300 bg-emerald-900/30 border-emerald-600/50",   icon: <Rss size={11} /> },
+];
 
 const FREE_FILTER_OPTIONS = [
-  { key: "all",    label: "All Free" },
+  { key: "all",    label: "All Books" },
+  { key: "free",   label: "Free Only" },
   { key: "ebook",  label: "Ebooks" },
   { key: "audio",  label: "Audiobooks" },
   { key: "serial", label: "Web Serials" },
 ];
 
+function hasFreeLinks(b: FreeBookEntry) {
+  return !!(b.ebookUrl || b.standardEbookUrl || b.borrowUrl || b.iaUrl || b.audioUrl || b.webSerialUrl);
+}
+
 function FreeBooksTab({ onRate }: { onRate: (b: BookData) => void }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const { data: freeBooks, isLoading, refetch, isFetching } = useQuery<FreeBookEntry[]>({
+  const { data: allEntries, isLoading, refetch, isFetching } = useQuery<FreeBookEntry[]>({
     queryKey: ["/api/free-books"],
     queryFn: async () => { const r = await apiRequest("GET", "/api/free-books"); return r.json(); },
-    staleTime: 1000 * 60 * 30, // cache 30 min
+    staleTime: 1000 * 60 * 30,
     gcTime: 1000 * 60 * 60,
   });
 
   const filtered = useMemo(() => {
-    if (!freeBooks) return [];
-    let list = [...freeBooks];
+    if (!allEntries) return [];
+    let list = [...allEntries];
+    if (filter === "free")   list = list.filter(hasFreeLinks);
     if (filter === "ebook")  list = list.filter(b => b.ebookUrl || b.standardEbookUrl || b.borrowUrl || b.iaUrl);
-    if (filter === "audio")  list = list.filter(b => b.audioUrl);
-    if (filter === "serial") list = list.filter(b => b.webSerialUrl);
+    if (filter === "audio")  list = list.filter(b => !!b.audioUrl);
+    if (filter === "serial") list = list.filter(b => !!b.webSerialUrl);
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(b => b.title.toLowerCase().includes(q) || b.author.toLowerCase().includes(q));
     }
     return list;
-  }, [freeBooks, filter, search]);
+  }, [allEntries, filter, search]);
+
+  const freeCount = useMemo(() => allEntries?.filter(hasFreeLinks).length ?? 0, [allEntries]);
 
   if (isLoading || isFetching) {
     return (
       <div className="flex flex-col items-center justify-center py-32 gap-4 text-muted-foreground">
         <Loader2 size={32} className="animate-spin text-primary" />
-        <p className="text-sm">Scanning all books for free copies…</p>
+        <p className="text-sm font-medium">Scanning all books for free copies…</p>
         <p className="text-xs opacity-60">Checking Open Library, LibriVox, Standard Ebooks & Royal Road</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
+      {/* Summary banner */}
+      {allEntries && (
+        <div className="flex items-center gap-3 p-3 rounded-xl bg-emerald-900/15 border border-emerald-700/25">
+          <Download size={16} className="text-emerald-400 flex-shrink-0" />
+          <p className="text-sm text-emerald-300">
+            <strong>{freeCount}</strong> of {allEntries.length} books have free copies available
+          </p>
+        </div>
+      )}
+
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex gap-1.5 flex-wrap">
           {FREE_FILTER_OPTIONS.map(f => (
             <button key={f.key} onClick={() => setFilter(f.key)}
               className={`text-xs px-3 py-1 rounded-full border transition-all ${
@@ -578,87 +597,92 @@ function FreeBooksTab({ onRate }: { onRate: (b: BookData) => void }) {
             </button>
           ))}
         </div>
-        <div className="flex-1 max-w-xs relative">
+        <div className="flex-1 min-w-[160px] max-w-xs relative">
           <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input placeholder="Search titles or authors…" value={search} onChange={e => setSearch(e.target.value)}
             className="pl-8 h-8 text-xs bg-muted/40 border-border/50" />
         </div>
         <button onClick={() => refetch()}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-muted/40">
-          <RefreshCw size={12} /> Refresh
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-muted/40 ml-auto">
+          <RefreshCw size={12} /> Re-scan
         </button>
-        <span className="text-xs text-muted-foreground ml-auto">
-          {filtered.length} book{filtered.length !== 1 ? "s" : ""} found
-        </span>
       </div>
 
-      {/* Legend */}
-      <div className="flex flex-wrap gap-2">
-        {Object.entries(SOURCE_LABELS).map(([key, { label, color, icon }]) => (
-          <span key={key} className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${color}`}>
-            {icon} {label}
-          </span>
-        ))}
-      </div>
+      {/* Book list */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {filtered.map(book => {
+          const freeLinks = FREE_SOURCE_DEFS.map(s => ({ ...s, url: book[s.key] as string | null })).filter(l => l.url);
+          const isFree = freeLinks.length > 0;
 
-      {/* List */}
-      {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <Library size={36} className="text-muted-foreground/30 mb-3" />
-          <p className="text-sm font-semibold text-foreground">No free titles found</p>
-          <p className="text-xs text-muted-foreground mt-1">Try a different filter or refresh to re-scan</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {filtered.map(book => {
-            const links: { key: string; url: string }[] = [
-              { key: "ebookUrl",         url: book.ebookUrl! },
-              { key: "standardEbookUrl", url: book.standardEbookUrl! },
-              { key: "borrowUrl",        url: book.borrowUrl! },
-              { key: "iaUrl",            url: book.iaUrl! },
-              { key: "audioUrl",         url: book.audioUrl! },
-              { key: "webSerialUrl",     url: book.webSerialUrl! },
-            ].filter(l => l.url);
+          return (
+            <div key={book.id}
+              className={`flex gap-3 rounded-xl border bg-card p-3 transition-all group ${
+                isFree
+                  ? "border-emerald-700/40 hover:border-emerald-500/60 hover:shadow-[0_0_12px_rgba(52,211,153,0.1)]"
+                  : "border-border/40 hover:border-border/70 opacity-80"
+              }`}>
 
-            return (
-              <div key={book.id}
-                className="flex gap-3 rounded-xl border border-border/50 bg-card p-3 hover:border-primary/40 hover:shadow-md transition-all group">
-                {/* Mini cover */}
-                <div className="flex-shrink-0 w-12 h-16 rounded-md flex items-center justify-center text-[10px] font-bold text-center leading-tight px-1"
-                  style={{ background: `linear-gradient(135deg, ${book.coverColor}, ${book.coverAccent})` }}>
-                  <span className="text-white/90 drop-shadow line-clamp-3">{book.title}</span>
+              {/* Cover */}
+              <div className="flex-shrink-0 w-14 h-20 rounded-md flex items-center justify-center text-[9px] font-bold text-center leading-tight px-1 relative"
+                style={{ background: `linear-gradient(135deg, ${book.coverColor}, ${book.coverAccent})` }}>
+                <span className="text-white/90 drop-shadow line-clamp-4">{book.title}</span>
+                {isFree && (
+                  <div className="absolute -top-1.5 -right-1.5 bg-emerald-500 text-white text-[8px] font-bold px-1 py-0.5 rounded-full leading-none">
+                    FREE
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-1 min-w-0 flex flex-col gap-2">
+                {/* Title row */}
+                <div className="flex items-start justify-between gap-1">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground leading-tight">{book.title}</h3>
+                    <p className="text-xs text-muted-foreground">{book.author}</p>
+                    {book.seriesName && <p className="text-[10px] text-muted-foreground/60 italic">{book.seriesName}</p>}
+                  </div>
+                  <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full border flex-shrink-0 ${genreClass(book.genre)}`}>
+                    {getGenreLabel(book.genre)}
+                  </span>
                 </div>
 
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h3 className="text-sm font-semibold text-foreground leading-tight group-hover:text-primary transition-colors">{book.title}</h3>
-                      <p className="text-xs text-muted-foreground">{book.author}</p>
-                      {book.seriesName && <p className="text-[10px] text-muted-foreground/60 italic">{book.seriesName}</p>}
-                    </div>
-                    <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full border flex-shrink-0 ${genreClass(book.genre)}`}>
-                      {getGenreLabel(book.genre)}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {links.map(({ key, url }) => {
-                      const src = SOURCE_LABELS[key];
-                      return (
-                        <a key={key} href={url} target="_blank" rel="noopener noreferrer"
-                          className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border transition-colors hover:opacity-80 ${src.color}`}
+                {/* FREE links */}
+                {isFree && (
+                  <div className="space-y-1">
+                    <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-400">Free</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {freeLinks.map(({ key, label, color, icon, url }) => (
+                        <a key={key} href={url!} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors hover:opacity-90 text-emerald-300 bg-emerald-900/30 border-emerald-600/50"
                           onClick={e => e.stopPropagation()}>
-                          {src.icon} {src.label} <ExternalLink size={8} />
+                          {icon} {label} <ExternalLink size={9} />
                         </a>
-                      );
-                    })}
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* BUY links — always shown, clearly labelled */}
+                <div className="space-y-1">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-orange-400">Buy</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    <a href={book.buyUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors hover:opacity-90 text-orange-300 bg-orange-900/20 border-orange-700/40"
+                      onClick={e => e.stopPropagation()}>
+                      <ExternalLink size={9} /> Amazon
+                    </a>
+                    <a href={book.goodreadsUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-lg border transition-colors hover:opacity-90 text-orange-300 bg-orange-900/20 border-orange-700/40"
+                      onClick={e => e.stopPropagation()}>
+                      <ExternalLink size={9} /> Goodreads
+                    </a>
                   </div>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -671,7 +695,9 @@ function RatingModal({ book, onClose, requireAuth }: { book: BookData | null; on
 
   // Fetch free ebook / audiobook links for this book
   const { data: freeLinks, isLoading: linksLoading } = useQuery<{
-    ebookUrl: string | null; borrowUrl: string | null; audioUrl: string | null; iaUrl?: string | null; standardEbookUrl?: string | null;
+    ebookUrl: string | null; borrowUrl: string | null; audioUrl: string | null;
+    iaUrl?: string | null; standardEbookUrl?: string | null;
+    buyUrl: string; goodreadsUrl: string;
   }>({
     queryKey: ["/api/books", book?.id, "free-links"],
     queryFn: async () => {
@@ -772,50 +798,69 @@ function RatingModal({ book, onClose, requireAuth }: { book: BookData | null; on
           <StarRating value={rating} onChange={setRating} />
         </div>
 
-        {/* Free ebook / audiobook links */}
+        {/* Free + Buy links */}
         {linksLoading ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
             <Loader2 size={12} className="animate-spin" /> Checking for free copies…
           </div>
-        ) : (freeLinks?.ebookUrl || freeLinks?.borrowUrl || freeLinks?.iaUrl || freeLinks?.audioUrl || freeLinks?.standardEbookUrl) ? (
-          <div className="rounded-lg border border-border/40 bg-muted/20 p-3 space-y-2">
-            <p className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
-              <BookOpen size={12} className="text-primary" /> Free to Read / Listen
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {freeLinks?.ebookUrl && (
-                <a href={freeLinks.ebookUrl} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-colors">
-                  <BookOpen size={11} /> Read Free (Open Library)
-                </a>
-              )}
-              {freeLinks?.borrowUrl && !freeLinks?.ebookUrl && (
-                <a href={freeLinks.borrowUrl} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md bg-amber-900/20 border border-amber-700/30 text-amber-400 hover:bg-amber-900/30 transition-colors">
-                  <BookOpen size={11} /> Borrow Free (1-hour loan)
-                </a>
-              )}
-              {freeLinks?.iaUrl && !freeLinks?.ebookUrl && (
-                <a href={freeLinks.iaUrl} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md bg-blue-900/20 border border-blue-700/30 text-blue-400 hover:bg-blue-900/30 transition-colors">
-                  <Globe size={11} /> Read on Archive.org
-                </a>
-              )}
-              {freeLinks?.standardEbookUrl && (
-                <a href={freeLinks.standardEbookUrl} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md bg-emerald-900/20 border border-emerald-700/30 text-emerald-400 hover:bg-emerald-900/30 transition-colors">
-                  <BookOpen size={11} /> Standard Ebooks (Free)
-                </a>
-              )}
-              {freeLinks?.audioUrl && (
-                <a href={freeLinks.audioUrl} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md bg-purple-900/20 border border-purple-700/30 text-purple-400 hover:bg-purple-900/30 transition-colors">
-                  <Flame size={11} /> Free Audiobook (LibriVox)
-                </a>
-              )}
-            </div>
+        ) : (
+          <div className="rounded-lg border border-border/40 bg-muted/10 p-3 space-y-3">
+            {/* FREE section — only shown if something is available */}
+            {(freeLinks?.ebookUrl || freeLinks?.borrowUrl || freeLinks?.iaUrl || freeLinks?.standardEbookUrl || freeLinks?.audioUrl) && (
+              <div className="space-y-1.5">
+                <p className="text-[9px] font-bold uppercase tracking-widest text-emerald-400">Free</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {freeLinks?.ebookUrl && (
+                    <a href={freeLinks.ebookUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg bg-emerald-900/30 border border-emerald-600/50 text-emerald-300 hover:opacity-90 transition-colors">
+                      <BookOpen size={11} /> Read Free <ExternalLink size={9} />
+                    </a>
+                  )}
+                  {freeLinks?.standardEbookUrl && (
+                    <a href={freeLinks.standardEbookUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg bg-emerald-900/30 border border-emerald-600/50 text-emerald-300 hover:opacity-90 transition-colors">
+                      <Download size={11} /> Standard Ebooks <ExternalLink size={9} />
+                    </a>
+                  )}
+                  {freeLinks?.borrowUrl && !freeLinks?.ebookUrl && (
+                    <a href={freeLinks.borrowUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg bg-emerald-900/30 border border-emerald-600/50 text-emerald-300 hover:opacity-90 transition-colors">
+                      <BookOpen size={11} /> Borrow Free <ExternalLink size={9} />
+                    </a>
+                  )}
+                  {freeLinks?.iaUrl && !freeLinks?.ebookUrl && (
+                    <a href={freeLinks.iaUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg bg-emerald-900/30 border border-emerald-600/50 text-emerald-300 hover:opacity-90 transition-colors">
+                      <Globe size={11} /> Archive.org <ExternalLink size={9} />
+                    </a>
+                  )}
+                  {freeLinks?.audioUrl && (
+                    <a href={freeLinks.audioUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg bg-emerald-900/30 border border-emerald-600/50 text-emerald-300 hover:opacity-90 transition-colors">
+                      <Headphones size={11} /> Free Audiobook <ExternalLink size={9} />
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+            {/* BUY section — always shown */}
+            {freeLinks && (
+              <div className="space-y-1.5">
+                <p className="text-[9px] font-bold uppercase tracking-widest text-orange-400">Buy</p>
+                <div className="flex flex-wrap gap-1.5">
+                  <a href={freeLinks.buyUrl} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg bg-orange-900/20 border border-orange-700/40 text-orange-300 hover:opacity-90 transition-colors">
+                    <ExternalLink size={11} /> Amazon
+                  </a>
+                  <a href={freeLinks.goodreadsUrl} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-[11px] font-medium px-3 py-1.5 rounded-lg bg-orange-900/20 border border-orange-700/40 text-orange-300 hover:opacity-90 transition-colors">
+                    <ExternalLink size={11} /> Goodreads
+                  </a>
+                </div>
+              </div>
+            )}
           </div>
-        ) : null}
+        )}
 
         <div className="flex gap-2 pt-2">
           <Button data-testid="save-rating" className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
