@@ -429,6 +429,7 @@ function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
 }) {
   const isRead = !!book.userRating;
   const [expanded, setExpanded] = useState(false);
+  const [hoverStar, setHoverStar] = useState(0);
 
   return (
     <div data-testid={`book-card-${book.id}`}
@@ -489,22 +490,33 @@ function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
           <div className="flex items-center gap-1.5"><Users size={11} className="text-blue-400 flex-shrink-0" /><ScoreDots score={book.characterScore} color="#60a5fa" /></div>
         </div>
 
-        {/* Stars + Similar — full width row, stars scale to fit */}
+        {/* Stars + Similar — full width row, stars scale to fit, each star opens rating modal */}
         <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-          {/* 10 stars share all available space equally */}
-          <div className="flex flex-1 min-w-0">
-            {isRead && book.userRating
-              ? Array.from({ length: 10 }).map((_, i) => (
-                  <svg key={i} viewBox="0 0 24 24" className={`flex-1 min-w-0 ${ i < book.userRating!.rating ? "text-yellow-400" : "text-muted-foreground/30"}`} fill={i < book.userRating!.rating ? "currentColor" : "none"} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+          {/* 10 star buttons share all available space equally */}
+          <div className="flex flex-1 min-w-0" onMouseLeave={() => setHoverStar(0)}>
+            {Array.from({ length: 10 }).map((_, i) => {
+              const filled = hoverStar > 0 ? i < hoverStar : (isRead && book.userRating ? i < book.userRating.rating : false);
+              return (
+                <button
+                  key={i}
+                  className="flex-1 min-w-0 p-0 border-0 bg-transparent cursor-pointer"
+                  onMouseEnter={() => setHoverStar(i + 1)}
+                  onClick={(e) => { e.stopPropagation(); onRate(book); }}
+                  aria-label={`Rate ${i + 1} stars`}
+                >
+                  <svg viewBox="0 0 24 24"
+                    className={`w-full h-auto transition-colors ${
+                      filled
+                        ? hoverStar > 0 ? "text-yellow-300" : "text-yellow-400"
+                        : "text-muted-foreground/25"
+                    }`}
+                    fill={filled ? "currentColor" : "none"}
+                    stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
                     <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
                   </svg>
-                ))
-              : Array.from({ length: 10 }).map((_, i) => (
-                  <svg key={i} viewBox="0 0 24 24" className="flex-1 min-w-0 text-muted-foreground/25 group-hover:text-muted-foreground/50 transition-colors" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
-                  </svg>
-                ))
-            }
+                </button>
+              );
+            })}
           </div>
           {/* Rating label or tap hint */}
           {isRead && book.userRating
