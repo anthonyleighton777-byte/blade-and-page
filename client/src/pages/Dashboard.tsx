@@ -482,8 +482,16 @@ function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
         </div>
 
         <div className="flex items-center justify-between">
-          <div>
-            {isRead && book.userRating && <StarRating value={book.userRating.rating} readonly />}
+          <div className="flex items-center gap-0.5">
+            {isRead && book.userRating
+              ? <StarRating value={book.userRating.rating} readonly />
+              : Array.from({ length: 10 }).map((_, i) => (
+                  <Star key={i} size={12} className="text-muted-foreground/25 group-hover:text-muted-foreground/50 transition-colors" />
+                ))
+            }
+            {!isRead && (
+              <span className="ml-1.5 text-[9px] text-muted-foreground/40 group-hover:text-muted-foreground/70 transition-colors">rate</span>
+            )}
           </div>
           <button data-testid={`find-similar-${book.id}`}
             onClick={(e) => { e.stopPropagation(); onSimilar(book); }}
