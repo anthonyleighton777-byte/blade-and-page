@@ -54,17 +54,23 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = (u: AuthUser) => { setAuthToken(u.token); setUser(u); queryClient.invalidateQueries(); };
   const logout = () => { setAuthToken(null); setUser(null); queryClient.invalidateQueries(); };
 
-  // Restore session from cookie on mount
+  // Restore session from cookie on mount — read cookie directly, no dynamic import
   useEffect(() => {
-    import("@/lib/queryClient").then(({ getAuthToken }) => {
-      const token = getAuthToken();
-      if (!token) return;
-      const base = ("__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__");
-      fetch(base + "/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.ok ? r.json() : null)
-        .then(data => { if (data?.userId) setUser({ userId: data.userId, username: data.username, token }); })
-        .catch(() => {});
-    });
+    // Read the token directly from the cookie (same logic as queryClient.ts)
+    const match = document.cookie.match(/(?:^|;\s*)bap_token=([^;]*)/);
+    const token = match ? decodeURIComponent(match[1]) : null;
+    if (!token) return;
+    // Validate against server — if token is good, restore the session silently
+    fetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.userId) {
+          setAuthToken(token); // ensure in-memory token matches
+          setUser({ userId: data.userId, username: data.username, token });
+          queryClient.invalidateQueries();
+        }
+      })
+      .catch(() => {});
   }, []);
 
   return <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>;
