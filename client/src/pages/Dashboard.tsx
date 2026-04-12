@@ -484,11 +484,6 @@ function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
         <div className="flex items-center justify-between">
           <div>
             {isRead && book.userRating && <StarRating value={book.userRating.rating} readonly />}
-            {!isRead && (
-              <p className="text-[10px] text-primary/50 group-hover:text-primary transition-colors">
-                Tap to rate →
-              </p>
-            )}
           </div>
           <button data-testid={`find-similar-${book.id}`}
             onClick={(e) => { e.stopPropagation(); onSimilar(book); }}
@@ -529,23 +524,7 @@ function RatingModal({ book, onClose, requireAuth }: { book: BookData | null; on
   });
 
   if (!book) return null;
-
-  if (!user) {
-    return (
-      <Dialog open={!!book} onOpenChange={onClose}>
-        <DialogContent className="max-w-sm bg-card border-border/60">
-          <DialogHeader><DialogTitle>Sign in to Rate</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Create a free account to rate books and contribute to the community recommendation pool.</p>
-          <div className="flex gap-2 pt-2">
-            <Button className="flex-1 gap-2" onClick={() => { onClose(); requireAuth(); }}>
-              <LogIn size={14} /> Sign In / Create Account
-            </Button>
-            <Button variant="outline" onClick={onClose}>Browse</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    );
-  }
+  if (!user) { requireAuth(); onClose(); return null; }
 
   return (
     <Dialog open={!!book} onOpenChange={onClose}>
