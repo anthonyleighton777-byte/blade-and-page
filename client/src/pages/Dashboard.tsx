@@ -12,7 +12,8 @@ import {
   BookOpen, Star, Swords, Sparkles, Users, SlidersHorizontal,
   Moon, Sun, TrendingUp, CheckCircle2, X, Flame, Zap, Search,
   Shuffle, ArrowLeft, ChevronDown, ChevronUp, Globe, Plus, Loader2,
-  LogIn, LogOut, UserPlus, PenLine, BarChart2, Tag, Wand2, Compass, RefreshCw
+  LogIn, LogOut, UserPlus, PenLine, BarChart2, Tag, Wand2, Compass, RefreshCw,
+  Headphones, Rss, Download, ExternalLink, Library
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -500,6 +501,164 @@ function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Free Books Tab ───────────────────────────────────────────────────────────
+interface FreeBookEntry {
+  id: number; title: string; author: string; genre: string;
+  coverColor: string; coverAccent: string; seriesName: string | null;
+  ebookUrl: string | null; borrowUrl: string | null; iaUrl: string | null;
+  audioUrl: string | null; standardEbookUrl: string | null; webSerialUrl: string | null;
+}
+
+const SOURCE_LABELS: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  ebookUrl:        { label: "Free Ebook",        color: "text-amber-400 bg-amber-900/20 border-amber-700/30",   icon: <BookOpen size={10} /> },
+  standardEbookUrl:{ label: "Standard Ebooks",   color: "text-emerald-400 bg-emerald-900/20 border-emerald-700/30", icon: <Download size={10} /> },
+  borrowUrl:       { label: "Borrow (1 hr)",      color: "text-yellow-400 bg-yellow-900/20 border-yellow-700/30",  icon: <BookOpen size={10} /> },
+  iaUrl:           { label: "Archive.org",        color: "text-blue-400 bg-blue-900/20 border-blue-700/30",       icon: <Globe size={10} /> },
+  audioUrl:        { label: "Audiobook",          color: "text-purple-400 bg-purple-900/20 border-purple-700/30", icon: <Headphones size={10} /> },
+  webSerialUrl:    { label: "Web Serial",         color: "text-cyan-400 bg-cyan-900/20 border-cyan-700/30",       icon: <Rss size={10} /> },
+};
+
+const FREE_FILTER_OPTIONS = [
+  { key: "all",    label: "All Free" },
+  { key: "ebook",  label: "Ebooks" },
+  { key: "audio",  label: "Audiobooks" },
+  { key: "serial", label: "Web Serials" },
+];
+
+function FreeBooksTab({ onRate }: { onRate: (b: BookData) => void }) {
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const { data: freeBooks, isLoading, refetch, isFetching } = useQuery<FreeBookEntry[]>({
+    queryKey: ["/api/free-books"],
+    queryFn: async () => { const r = await apiRequest("GET", "/api/free-books"); return r.json(); },
+    staleTime: 1000 * 60 * 30, // cache 30 min
+    gcTime: 1000 * 60 * 60,
+  });
+
+  const filtered = useMemo(() => {
+    if (!freeBooks) return [];
+    let list = [...freeBooks];
+    if (filter === "ebook")  list = list.filter(b => b.ebookUrl || b.standardEbookUrl || b.borrowUrl || b.iaUrl);
+    if (filter === "audio")  list = list.filter(b => b.audioUrl);
+    if (filter === "serial") list = list.filter(b => b.webSerialUrl);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(b => b.title.toLowerCase().includes(q) || b.author.toLowerCase().includes(q));
+    }
+    return list;
+  }, [freeBooks, filter, search]);
+
+  if (isLoading || isFetching) {
+    return (
+      <div className="flex flex-col items-center justify-center py-32 gap-4 text-muted-foreground">
+        <Loader2 size={32} className="animate-spin text-primary" />
+        <p className="text-sm">Scanning all books for free copies…</p>
+        <p className="text-xs opacity-60">Checking Open Library, LibriVox, Standard Ebooks & Royal Road</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex gap-1.5">
+          {FREE_FILTER_OPTIONS.map(f => (
+            <button key={f.key} onClick={() => setFilter(f.key)}
+              className={`text-xs px-3 py-1 rounded-full border transition-all ${
+                filter === f.key
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "border-border/50 text-muted-foreground hover:border-primary/40 hover:text-foreground"
+              }`}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex-1 max-w-xs relative">
+          <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input placeholder="Search titles or authors…" value={search} onChange={e => setSearch(e.target.value)}
+            className="pl-8 h-8 text-xs bg-muted/40 border-border/50" />
+        </div>
+        <button onClick={() => refetch()}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded hover:bg-muted/40">
+          <RefreshCw size={12} /> Refresh
+        </button>
+        <span className="text-xs text-muted-foreground ml-auto">
+          {filtered.length} book{filtered.length !== 1 ? "s" : ""} found
+        </span>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-2">
+        {Object.entries(SOURCE_LABELS).map(([key, { label, color, icon }]) => (
+          <span key={key} className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${color}`}>
+            {icon} {label}
+          </span>
+        ))}
+      </div>
+
+      {/* List */}
+      {filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <Library size={36} className="text-muted-foreground/30 mb-3" />
+          <p className="text-sm font-semibold text-foreground">No free titles found</p>
+          <p className="text-xs text-muted-foreground mt-1">Try a different filter or refresh to re-scan</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {filtered.map(book => {
+            const links: { key: string; url: string }[] = [
+              { key: "ebookUrl",         url: book.ebookUrl! },
+              { key: "standardEbookUrl", url: book.standardEbookUrl! },
+              { key: "borrowUrl",        url: book.borrowUrl! },
+              { key: "iaUrl",            url: book.iaUrl! },
+              { key: "audioUrl",         url: book.audioUrl! },
+              { key: "webSerialUrl",     url: book.webSerialUrl! },
+            ].filter(l => l.url);
+
+            return (
+              <div key={book.id}
+                className="flex gap-3 rounded-xl border border-border/50 bg-card p-3 hover:border-primary/40 hover:shadow-md transition-all group">
+                {/* Mini cover */}
+                <div className="flex-shrink-0 w-12 h-16 rounded-md flex items-center justify-center text-[10px] font-bold text-center leading-tight px-1"
+                  style={{ background: `linear-gradient(135deg, ${book.coverColor}, ${book.coverAccent})` }}>
+                  <span className="text-white/90 drop-shadow line-clamp-3">{book.title}</span>
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground leading-tight group-hover:text-primary transition-colors">{book.title}</h3>
+                      <p className="text-xs text-muted-foreground">{book.author}</p>
+                      {book.seriesName && <p className="text-[10px] text-muted-foreground/60 italic">{book.seriesName}</p>}
+                    </div>
+                    <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full border flex-shrink-0 ${genreClass(book.genre)}`}>
+                      {getGenreLabel(book.genre)}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {links.map(({ key, url }) => {
+                      const src = SOURCE_LABELS[key];
+                      return (
+                        <a key={key} href={url} target="_blank" rel="noopener noreferrer"
+                          className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border transition-colors hover:opacity-80 ${src.color}`}
+                          onClick={e => e.stopPropagation()}>
+                          {src.icon} {src.label} <ExternalLink size={8} />
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -995,6 +1154,7 @@ function DashboardInner() {
   const [showSearchOnline, setShowSearchOnline] = useState(false);
   const [discoveries, setDiscoveries] = useState<BookData[]>([]);
   const [forYouIds, setForYouIds] = useState<Set<number>>(new Set());
+  const [activeTab, setActiveTab] = useState<"library" | "free">("library");
   const autoDiscoveredRef = useRef(false);
 
   const { data: books = [], isLoading } = useQuery<BookData[]>({ queryKey: ["/api/books"] });
@@ -1217,7 +1377,41 @@ function DashboardInner() {
         )}
       </header>
 
+      {/* ── Tab bar ── */}
+      <div className="border-b border-border/40 bg-background/80 sticky top-[57px] z-30">
+        <div className="max-w-7xl mx-auto px-4 flex items-center gap-0">
+          <button
+            onClick={() => setActiveTab("library")}
+            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-all ${
+              activeTab === "library"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
+            }`}>
+            <BookOpen size={14} /> Library
+          </button>
+          <button
+            onClick={() => setActiveTab("free")}
+            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-all ${
+              activeTab === "free"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
+            }`}>
+            <Download size={14} /> Free Books
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-900/40 text-emerald-400 border border-emerald-700/30 font-semibold">FREE</span>
+          </button>
+        </div>
+      </div>
+
       <div className="max-w-7xl mx-auto px-4 py-6 flex gap-6">
+        {/* Free Books tab — full width */}
+        {activeTab === "free" && (
+          <main className="flex-1 min-w-0">
+            <FreeBooksTab onRate={b => { if (!user) setShowAuthModal(true); else setRatingModal(b as any); }} />
+          </main>
+        )}
+
+        {/* Library tab */}
+        {activeTab === "library" && <>
         {/* Main content */}
         <main className="flex-1 min-w-0">
           {/* Genre pills — dynamic */}
@@ -1294,6 +1488,7 @@ function DashboardInner() {
             onDiscover={() => discoverMutation.mutate()}
             isDiscovering={discoverMutation.isPending} />
         </aside>
+        </>}
       </div>
 
       <AuthModal open={showAuthModal} onClose={() => setShowAuthModal(false)} />

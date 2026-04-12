@@ -1260,6 +1260,146 @@ export function registerRoutes(httpServer: any, app: Express): Server {
     }).on("error", (err: any) => res.status(500).json({ error: err.message }));
   });
 
+  // ── GET /api/free-books — bulk scan all books for free availability ──
+  // Throttles to 4 concurrent books to avoid hammering external APIs
+  app.get("/api/free-books", (req, res) => {
+    const allBooks = storage.getAllBooks();
+
+    function checkBook(book: any): Promise<any> {
+      return new Promise((resolve) => {
+        const title = book.title;
+        const author = book.author;
+        const tags: string[] = JSON.parse(book.tags || "[]");
+        const out: any = {
+          id: book.id, title, author, genre: book.genre,
+          coverColor: book.coverColor, coverAccent: book.coverAccent,
+          seriesName: book.seriesName,
+          ebookUrl: null, borrowUrl: null, iaUrl: null, audioUrl: null,
+          standardEbookUrl: null, webSerialUrl: null,
+        };
+        let pending = 4;
+        const done = () => {
+          if (--pending === 0) {
+            const hasFree = out.ebookUrl || out.borrowUrl || out.iaUrl ||
+              out.audioUrl || out.standardEbookUrl || out.webSerialUrl;
+            resolve(hasFree ? out : null);
+          }
+        };
+
+        // 1) Open Library
+        const olQ = encodeURIComponent(`${title} ${author}`);
+        const olUrl = `https://openlibrary.org/search.json?q=${olQ}&limit=5&fields=key,title,author_name,ia,ebook_access,lending_edition_s`;
+        https.get(olUrl, { headers: { "User-Agent": "BladeAndPage/1.0" } }, (r) => {
+          let d = "";
+          r.on("data", c => d += c);
+          r.on("end", () => {
+            try {
+              const json = JSON.parse(d);
+              const docs = json.docs || [];
+              const match = docs.find((doc: any) =>
+                (doc.title || "").toLowerCase().includes(title.toLowerCase().slice(0, 15))
+              ) || docs[0];
+              if (match) {
+                const access = match.ebook_access || "";
+                if (access === "public") {
+                  const ia = match.ia?.[0];
+                  out.ebookUrl = ia ? `https://archive.org/embed/${ia}` : `https://openlibrary.org${match.key}`;
+                } else if (access === "borrowable" || match.lending_edition_s) {
+                  out.borrowUrl = `https://openlibrary.org${match.key}`;
+                }
+                if (!out.ebookUrl && match.ia?.[0]) {
+                  out.iaUrl = `https://archive.org/details/${match.ia[0]}`;
+                }
+              }
+            } catch { }
+            done();
+          });
+        }).on("error", () => done());
+
+        // 2) LibriVox
+        const lvQ = encodeURIComponent(title);
+        const lvUrl = `https://librivox.org/api/feed/audiobooks?title=${lvQ}&format=json&extended=1&limit=3`;
+        https.get(lvUrl, { headers: { "User-Agent": "BladeAndPage/1.0" } }, (r) => {
+          let d = "";
+          r.on("data", c => d += c);
+          r.on("end", () => {
+            try {
+              const json = JSON.parse(d);
+              const books = json.books || [];
+              const match = books.find((b: any) =>
+                (b.title || "").toLowerCase().includes(title.toLowerCase().slice(0, 12))
+              );
+              if (match) out.audioUrl = match.url_librivox || `https://librivox.org/${match.id}`;
+            } catch { }
+            done();
+          });
+        }).on("error", () => done());
+
+        // 3) Standard Ebooks
+        const seAuthorSlug = author.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        const seTitleSlug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        const seUrl = `https://standardebooks.org/ebooks/${seAuthorSlug}/${seTitleSlug}`;
+        https.get(seUrl, { headers: { "User-Agent": "BladeAndPage/1.0" } }, (r) => {
+          if (r.statusCode === 200) out.standardEbookUrl = seUrl;
+          r.resume();
+          r.on("end", () => done());
+        }).on("error", () => done());
+
+        // 4) Royal Road — web serial search (title slug on royalroad.com)
+        //    Also handles books already tagged "web-serial" pointing to Royal Road
+        const rrQ = encodeURIComponent(`${title} ${author}`);
+        const rrSearchUrl = `https://www.royalroad.com/fictions/search?title=${encodeURIComponent(title)}&orderBy=best_result&count=5`;
+        https.get(rrSearchUrl, { headers: { "User-Agent": "BladeAndPage/1.0" } }, (r) => {
+          let d = "";
+          r.on("data", c => d += c);
+          r.on("end", () => {
+            try {
+              // Royal Road search results contain fiction titles in the HTML
+              const titleLower = title.toLowerCase();
+              // Look for a fiction link matching the title
+              const match = d.match(/href="\/fiction\/\d+\/([^"]+)"[^>]*>[^<]*<\/a>/gi);
+              if (match) {
+                for (const m of match) {
+                  const slugMatch = m.match(/href="(\/fiction\/\d+\/[^"]+)"/);
+                  const labelMatch = m.match(/>([^<]+)<\/a>/);
+                  if (slugMatch && labelMatch) {
+                    const label = labelMatch[1].trim().toLowerCase();
+                    if (label.includes(titleLower.slice(0, 10)) || titleLower.includes(label.slice(0, 10))) {
+                      out.webSerialUrl = `https://www.royalroad.com${slugMatch[1]}`;
+                      break;
+                    }
+                  }
+                }
+              }
+            } catch { }
+            // Also mark as web serial if already tagged
+            if (!out.webSerialUrl && tags.includes("web-serial")) {
+              out.webSerialUrl = `https://www.royalroad.com/fictions/search?title=${encodeURIComponent(title)}`;
+            }
+            done();
+          });
+        }).on("error", () => {
+          if (tags.includes("web-serial")) {
+            out.webSerialUrl = `https://www.royalroad.com/fictions/search?title=${encodeURIComponent(title)}`;
+          }
+          done();
+        });
+      });
+    }
+
+    // Process in batches of 5 to avoid hammering external APIs
+    async function runBatched() {
+      const results: any[] = [];
+      for (let i = 0; i < allBooks.length; i += 5) {
+        const batch = allBooks.slice(i, i + 5);
+        const batchResults = await Promise.all(batch.map(checkBook));
+        results.push(...batchResults.filter(Boolean));
+      }
+      res.json(results);
+    }
+    runBatched().catch(() => res.status(500).json({ error: "Scan failed" }));
+  });
+
   // ── GET /api/books/:id/free-links — check Open Library availability + LibriVox ──
   app.get("/api/books/:id/free-links", (req, res) => {
     const book = storage.getBook(Number(req.params.id));
