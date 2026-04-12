@@ -4,9 +4,24 @@ const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 // When deployed on Render/Railway, API_BASE is empty and relative URLs work because
 // Express serves both the API and the static frontend on the same port.
 
-// Auth token store — set by AuthProvider after login
-let _authToken: string | null = null;
-export function setAuthToken(token: string | null) { _authToken = token; }
+// Auth token — persisted in a cookie so it survives page refresh and Render restarts
+const TOKEN_COOKIE = "bap_token";
+function readCookie(): string | null {
+  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${TOKEN_COOKIE}=([^;]*)`))
+  return match ? decodeURIComponent(match[1]) : null;
+}
+function writeCookie(token: string | null) {
+  if (token) {
+    // 10 years
+    const expires = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toUTCString();
+    document.cookie = `${TOKEN_COOKIE}=${encodeURIComponent(token)};expires=${expires};path=/;SameSite=Lax`;
+  } else {
+    document.cookie = `${TOKEN_COOKIE}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+  }
+}
+
+let _authToken: string | null = readCookie();
+export function setAuthToken(token: string | null) { _authToken = token; writeCookie(token); }
 export function getAuthToken() { return _authToken; }
 
 function authHeaders(extra?: Record<string, string>): Record<string, string> {

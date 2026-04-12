@@ -5,21 +5,11 @@ import { insertRatingSchema, insertBookSchema } from "@shared/schema";
 import https from "https";
 import crypto from "crypto";
 
-// Simple password hashing (no external dep)
-function hashPassword(pw: string): string {
-  return crypto.createHash("sha256").update(pw + "blade-and-page-salt").digest("hex");
-}
-
-// Tiny session store (in-memory, survives the process)
-const sessions = new Map<string, number>(); // token → userId
-function createSession(userId: number): string {
-  const token = crypto.randomBytes(32).toString("hex");
-  sessions.set(token, userId);
-  return token;
-}
+// Persistent session — looks up token from DB, not memory
 function getSession(token: string | undefined): number | null {
   if (!token) return null;
-  return sessions.get(token) ?? null;
+  const user = storage.getUserByToken(token);
+  return user ? user.id : null;
 }
 
 const SEED_BOOKS = [
@@ -902,42 +892,26 @@ export function registerRoutes(httpServer: any, app: Express): Server {
     storage.seedBooks(SEED_BOOKS as any);
   }
 
-  // ── Auth ───────────────────────────────────────────────────────────────────
+  // ── Auth (passwordless — email only) ──────────────────────────────────────
 
-  // POST /api/auth/register
-  app.post("/api/auth/register", (req, res) => {
-    const { username, password } = req.body;
-    if (!username || !password || username.length < 2 || password.length < 4) {
-      res.status(400).json({ error: "Username (2+ chars) and password (4+ chars) required." });
+  // POST /api/auth/signin — creates account if new, signs in if existing, returns permanent token
+  app.post("/api/auth/signin", (req, res) => {
+    const { email } = req.body;
+    const emailClean = (email || "").trim().toLowerCase();
+    if (!emailClean || !/^[^@]+@[^@]+\.[^@]+$/.test(emailClean)) {
+      res.status(400).json({ error: "Please enter a valid email address." });
       return;
     }
-    const existing = storage.getUserByUsername(username.trim());
-    if (existing) {
-      res.status(409).json({ error: "Username already taken." });
-      return;
+    try {
+      const user = storage.findOrCreateUserByEmail(emailClean);
+      const token = storage.createToken(user.id);
+      res.json({ token, userId: user.id, username: user.username });
+    } catch (e: any) {
+      res.status(500).json({ error: "Sign in failed." });
     }
-    const user = storage.createUser({
-      username: username.trim(),
-      passwordHash: hashPassword(password),
-      createdAt: Math.floor(Date.now() / 1000),
-    });
-    const token = createSession(user.id);
-    res.json({ token, userId: user.id, username: user.username });
   });
 
-  // POST /api/auth/login
-  app.post("/api/auth/login", (req, res) => {
-    const { username, password } = req.body;
-    const user = storage.getUserByUsername((username || "").trim());
-    if (!user || user.passwordHash !== hashPassword(password || "")) {
-      res.status(401).json({ error: "Invalid username or password." });
-      return;
-    }
-    const token = createSession(user.id);
-    res.json({ token, userId: user.id, username: user.username });
-  });
-
-  // GET /api/auth/me — validate session
+  // GET /api/auth/me — validate persistent token
   app.get("/api/auth/me", (req, res) => {
     const token = req.headers.authorization?.replace("Bearer ", "");
     const userId = getSession(token);
@@ -946,6 +920,10 @@ export function registerRoutes(httpServer: any, app: Express): Server {
     if (!user) { res.status(401).json({ error: "User not found" }); return; }
     res.json({ userId: user.id, username: user.username });
   });
+
+  // Keep old register/login endpoints returning a helpful message
+  app.post("/api/auth/register", (req, res) => res.status(410).json({ error: "Use /api/auth/signin with your email." }));
+  app.post("/api/auth/login", (req, res) => res.status(410).json({ error: "Use /api/auth/signin with your email." }));
 
   // ── Books ──────────────────────────────────────────────────────────────────
 

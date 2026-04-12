@@ -22,9 +22,17 @@ export const books = sqliteTable("books", {
 
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  username: text("username").notNull().unique(),
-  passwordHash: text("password_hash").notNull(),
-  createdAt: integer("created_at").notNull(), // unix timestamp
+  email: text("email").notNull().unique(),
+  username: text("username").notNull(), // derived from email (part before @)
+  createdAt: integer("created_at").notNull(),
+});
+
+// Persistent tokens — survive server restarts forever
+export const userTokens = sqliteTable("user_tokens", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull(),
+  token: text("token").notNull().unique(),
+  createdAt: integer("created_at").notNull(),
 });
 
 export const userRatings = sqliteTable("user_ratings", {
@@ -39,6 +47,7 @@ export const userRatings = sqliteTable("user_ratings", {
 export const insertBookSchema = createInsertSchema(books).omit({ id: true });
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertRatingSchema = createInsertSchema(userRatings).omit({ id: true });
+export const insertTokenSchema = createInsertSchema(userTokens).omit({ id: true });
 
 export type Book = typeof books.$inferSelect;
 export type InsertBook = z.infer<typeof insertBookSchema>;
@@ -46,3 +55,4 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type UserRating = typeof userRatings.$inferSelect;
 export type InsertRating = z.infer<typeof insertRatingSchema>;
+export type UserToken = typeof userTokens.$inferSelect;

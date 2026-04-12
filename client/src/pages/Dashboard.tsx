@@ -52,6 +52,20 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const login = (u: AuthUser) => { setAuthToken(u.token); setUser(u); queryClient.invalidateQueries(); };
   const logout = () => { setAuthToken(null); setUser(null); queryClient.invalidateQueries(); };
+
+  // Restore session from cookie on mount
+  useEffect(() => {
+    import("@/lib/queryClient").then(({ getAuthToken }) => {
+      const token = getAuthToken();
+      if (!token) return;
+      const base = ("__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__");
+      fetch(base + "/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data?.userId) setUser({ userId: data.userId, username: data.username, token }); })
+        .catch(() => {});
+    });
+  }, []);
+
   return <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>;
 }
 
@@ -108,9 +122,7 @@ function pickCoverColors(genre: string) {
 function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { login } = useAuth();
   const { toast } = useToast();
-  const [mode, setMode] = useState<"login" | "signup">("login");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -118,55 +130,52 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     setError(""); setLoading(true);
     try {
       const base = ("__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__");
-      const res = await fetch(base + (mode === "login" ? "/api/auth/login" : "/api/auth/register"), {
+      const res = await fetch(base + "/api/auth/signin", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim(), password }),
+        body: JSON.stringify({ email: email.trim() }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Something went wrong."); return; }
       login({ userId: data.userId, username: data.username, token: data.token });
-      toast({ title: mode === "login" ? `Welcome back, ${data.username}!` : `Welcome, ${data.username}!` });
+      toast({ title: `Welcome, ${data.username}!`, description: "You're signed in — your token is saved permanently." });
       onClose();
     } catch { setError("Network error. Try again."); }
     finally { setLoading(false); }
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { onClose(); setEmail(""); setError(""); } }}>
       <DialogContent className="max-w-sm bg-card border-border/60">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {mode === "login" ? <LogIn size={16} className="text-primary" /> : <UserPlus size={16} className="text-primary" />}
-            {mode === "login" ? "Sign In" : "Create Account"}
+            <LogIn size={16} className="text-primary" />
+            Sign In
           </DialogTitle>
         </DialogHeader>
         <p className="text-xs text-muted-foreground -mt-2">
-          {mode === "login" ? "Sign in to rate books and join the community pool." : "Create a username — your ratings contribute to everyone's recommendations."}
+          Enter your email — we'll remember you permanently. No password needed.
         </p>
         <div className="space-y-3 mt-1">
           <div>
-            <label className="text-xs font-medium text-foreground mb-1 block">Username</label>
-            <Input data-testid="auth-username" autoFocus placeholder="e.g. bladereader" value={username}
-              onChange={(e) => setUsername(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
-              className="h-9 text-sm" />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-foreground mb-1 block">Password</label>
-            <Input data-testid="auth-password" type="password" placeholder="••••••" value={password}
-              onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
-              className="h-9 text-sm" />
+            <label className="text-xs font-medium text-foreground mb-1 block">Email address</label>
+            <Input
+              data-testid="auth-email"
+              autoFocus
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submit()}
+              className="h-9 text-sm"
+            />
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
-          <Button data-testid="auth-submit" className="w-full gap-2" onClick={submit} disabled={loading || !username || !password}>
-            {loading ? <Loader2 size={14} className="animate-spin" /> : mode === "login" ? <LogIn size={14} /> : <UserPlus size={14} />}
-            {mode === "login" ? "Sign In" : "Create Account"}
+          <Button data-testid="auth-submit" className="w-full gap-2" onClick={submit} disabled={loading || !email.trim()}>
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
+            Continue
           </Button>
           <p className="text-center text-xs text-muted-foreground">
-            {mode === "login" ? "No account? " : "Have an account? "}
-            <button onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(""); }}
-              className="text-primary hover:underline">
-              {mode === "login" ? "Create one" : "Sign in"}
-            </button>
+            New here? Just enter your email — your account is created automatically.
           </p>
         </div>
       </DialogContent>

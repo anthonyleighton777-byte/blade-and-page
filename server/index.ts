@@ -26,10 +26,22 @@ function migrateDb() {
       publish_year INTEGER,
       tags TEXT NOT NULL DEFAULT '[]'
     )`);
+    // New users table (passwordless — email based)
     db.run(sql`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      username TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`);
+    // Migrate old username-based users: add email column if missing
+    try {
+      db.run(sql`ALTER TABLE users ADD COLUMN email TEXT`);
+    } catch { /* column already exists */ }
+    // Persistent token store
+    db.run(sql`CREATE TABLE IF NOT EXISTS user_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token TEXT NOT NULL UNIQUE,
       created_at INTEGER NOT NULL
     )`);
     db.run(sql`CREATE TABLE IF NOT EXISTS user_ratings (

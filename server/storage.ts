@@ -1,9 +1,10 @@
 import { db } from "./db";
 import {
-  books, users, userRatings,
+  books, users, userRatings, userTokens,
   type Book, type InsertBook,
   type User, type InsertUser,
   type UserRating, type InsertRating,
+  type UserToken,
 } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
@@ -15,10 +16,14 @@ export interface IStorage {
   seedBooks(data: InsertBook[]): void;
   getBooksCount(): number;
 
-  // Users
-  createUser(data: InsertUser): User;
-  getUserByUsername(username: string): User | undefined;
+  // Users (passwordless — email only)
+  findOrCreateUserByEmail(email: string): User;
+  getUserByEmail(email: string): User | undefined;
   getUserById(id: number): User | undefined;
+
+  // Persistent tokens
+  createToken(userId: number): string;
+  getUserByToken(token: string): User | undefined;
 
   // Ratings (per-user)
   getUserRatings(userId: number): UserRating[];
@@ -51,16 +56,37 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ── Users ──────────────────────────────────────────────────────────────────
-  createUser(data: InsertUser): User {
-    return db.insert(users).values(data).returning().get();
+  findOrCreateUserByEmail(email: string): User {
+    const existing = db.select().from(users).where(eq(users.email, email)).get();
+    if (existing) return existing;
+    const username = email.split("@")[0].replace(/[^a-zA-Z0-9_]/g, "").slice(0, 24) || "reader";
+    return db.insert(users).values({
+      email,
+      username,
+      createdAt: Date.now(),
+    }).returning().get();
   }
 
-  getUserByUsername(username: string): User | undefined {
-    return db.select().from(users).where(eq(users.username, username)).get();
+  getUserByEmail(email: string): User | undefined {
+    return db.select().from(users).where(eq(users.email, email)).get();
   }
 
   getUserById(id: number): User | undefined {
     return db.select().from(users).where(eq(users.id, id)).get();
+  }
+
+  // ── Persistent Tokens ──────────────────────────────────────────────────────
+  createToken(userId: number): string {
+    const { randomBytes } = require("crypto");
+    const token = randomBytes(32).toString("hex");
+    db.insert(userTokens).values({ userId, token, createdAt: Date.now() }).run();
+    return token;
+  }
+
+  getUserByToken(token: string): User | undefined {
+    const row = db.select().from(userTokens).where(eq(userTokens.token, token)).get();
+    if (!row) return undefined;
+    return db.select().from(users).where(eq(users.id, row.userId)).get();
   }
 
   // ── Ratings ────────────────────────────────────────────────────────────────
