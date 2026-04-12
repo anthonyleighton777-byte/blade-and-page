@@ -356,11 +356,12 @@ function ScoreDots({ score, color }: { score: number; color: string }) {
 function StarRating({ value, onChange, readonly = false, size: starSize = 18 }: { value: number; onChange?: (v: number) => void; readonly?: boolean; size?: number }) {
   const [hovered, setHovered] = useState(0);
   const display = readonly ? value : (hovered || value);
+  const gapClass = starSize >= 28 ? "gap-0" : "gap-0.5";
   return (
-    <div className="flex gap-0.5" onMouseLeave={() => !readonly && setHovered(0)}>
+    <div className={`flex ${gapClass} w-full`} onMouseLeave={() => !readonly && setHovered(0)}>
       {Array.from({ length: 10 }).map((_, i) => (
         <button key={i} data-testid={`star-${i + 1}`} disabled={readonly}
-          className={`transition-all ${readonly ? "cursor-default" : "cursor-pointer hover:scale-110"}`}
+          className={`transition-all flex items-center justify-center ${starSize >= 28 ? "flex-1" : ""} ${readonly ? "cursor-default" : "cursor-pointer hover:scale-110"}`}
           onMouseEnter={() => !readonly && setHovered(i + 1)}
           onClick={() => onChange?.(i + 1)}>
           <Star size={starSize} className={i < display ? "text-yellow-400" : "text-muted-foreground/30"} fill={i < display ? "currentColor" : "none"} />
@@ -488,23 +489,26 @@ function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
           <div className="flex items-center gap-1.5"><Users size={11} className="text-blue-400 flex-shrink-0" /><ScoreDots score={book.characterScore} color="#60a5fa" /></div>
         </div>
 
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-0.5">
-            {isRead && book.userRating
-              ? <StarRating value={book.userRating.rating} readonly size={32} />
-              : Array.from({ length: 10 }).map((_, i) => (
-                  <Star key={i} size={32} className="text-muted-foreground/25 group-hover:text-muted-foreground/50 transition-colors" />
-                ))
-            }
-            {!isRead && (
-              <span className="ml-1.5 text-[10px] text-muted-foreground/40 group-hover:text-muted-foreground/70 transition-colors">tap to rate</span>
-            )}
-          </div>
+        {/* Similar button — right-aligned above the stars */}
+        <div className="flex justify-end">
           <button data-testid={`find-similar-${book.id}`}
             onClick={(e) => { e.stopPropagation(); onSimilar(book); }}
-            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors px-2 py-1 rounded hover:bg-primary/10">
+            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors px-2 py-0.5 rounded hover:bg-primary/10">
             <Shuffle size={10} /> Similar
           </button>
+        </div>
+
+        {/* Stars — full width, no gaps so all 10 fit */}
+        <div className="flex items-center" onClick={e => e.stopPropagation()}>
+          {isRead && book.userRating
+            ? <StarRating value={book.userRating.rating} readonly size={32} />
+            : <>
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <Star key={i} size={32} className="flex-1 text-muted-foreground/25 group-hover:text-muted-foreground/50 transition-colors" />
+                ))}
+                <span className="ml-1 text-[10px] text-muted-foreground/40 group-hover:text-muted-foreground/70 transition-colors whitespace-nowrap">tap to rate</span>
+              </>
+          }
         </div>
       </div>
     </div>
