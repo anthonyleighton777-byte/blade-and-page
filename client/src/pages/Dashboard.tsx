@@ -491,9 +491,9 @@ function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-0.5">
             {isRead && book.userRating
-              ? <StarRating value={book.userRating.rating} readonly size={16} />
+              ? <StarRating value={book.userRating.rating} readonly size={32} />
               : Array.from({ length: 10 }).map((_, i) => (
-                  <Star key={i} size={16} className="text-muted-foreground/25 group-hover:text-muted-foreground/50 transition-colors" />
+                  <Star key={i} size={32} className="text-muted-foreground/25 group-hover:text-muted-foreground/50 transition-colors" />
                 ))
             }
             {!isRead && (
