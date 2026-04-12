@@ -415,21 +415,22 @@ function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
 
   return (
     <div data-testid={`book-card-${book.id}`}
-      className={`relative rounded-xl border p-4 flex gap-4 transition-all duration-200 hover:border-primary/40 group ${isRead ? "read-overlay" : "bg-card border-border/50"} ${forYou ? "ring-1 ring-cyan-500/40 shadow-[0_0_12px_rgba(6,182,212,0.15)]" : ""}`}>
+      onClick={() => onRate(book)}
+      className={`relative rounded-xl border p-4 flex gap-4 transition-all duration-200 hover:border-primary/40 hover:shadow-md cursor-pointer group ${isRead ? "read-overlay" : "bg-card border-border/50"} ${forYou ? "ring-1 ring-cyan-500/40 shadow-[0_0_12px_rgba(6,182,212,0.15)]" : ""}`}>
       {forYou && (
         <div className="absolute top-3 left-3 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-cyan-900/40 border border-cyan-600/30">
           <Compass size={10} className="text-cyan-400" />
           <span className="text-[9px] font-semibold text-cyan-300">For You</span>
         </div>
       )}
-      {isRead && <div className={`absolute top-3 ${forYou ? 'right-3' : 'right-3'} z-10`}><CheckCircle2 size={16} className="text-primary" /></div>}
+      {isRead && <div className="absolute top-3 right-3 z-10"><CheckCircle2 size={16} className="text-primary" /></div>}
 
-      <div onClick={() => onRate(book)} className="cursor-pointer">
+      <div className="flex-shrink-0">
         <BookCover book={book} size="md" />
       </div>
 
       <div className="flex-1 min-w-0 flex flex-col gap-2">
-        <div onClick={() => onRate(book)} className="cursor-pointer">
+        <div>
           <h3 className="font-semibold text-sm leading-tight text-foreground group-hover:text-primary transition-colors pr-5">{book.title}</h3>
           <p className="text-xs text-muted-foreground mt-0.5">{book.author}</p>
           {book.seriesName && (
@@ -439,7 +440,7 @@ function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
           )}
         </div>
 
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1" onClick={e => e.stopPropagation()}>
           <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${genreClass(book.genre)}`}>
             {getGenreLabel(book.genre)}
           </span>
@@ -448,13 +449,12 @@ function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
               {getGenreLabel(s)}
             </span>
           ))}
-          {/* Community avg */}
           {book.communityRating && (
             <CommunityBadge cr={book.communityRating} onClick={() => onCommunity(book)} />
           )}
         </div>
 
-        <div onClick={() => onRate(book)} className="cursor-pointer">
+        <div>
           <p className={`text-xs text-muted-foreground leading-relaxed ${expanded ? "" : "line-clamp-2"}`}>
             {book.description}
           </p>
@@ -476,12 +476,13 @@ function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
           <div>
             {isRead && book.userRating && <StarRating value={book.userRating.rating} readonly />}
             {!isRead && (
-              <p className="text-[10px] text-muted-foreground/50 group-hover:text-primary/60 transition-colors cursor-pointer" onClick={() => onRate(book)}>
-                Click to rate →
+              <p className="text-[10px] text-primary/50 group-hover:text-primary transition-colors">
+                Tap to rate →
               </p>
             )}
           </div>
-          <button data-testid={`find-similar-${book.id}`} onClick={() => onSimilar(book)}
+          <button data-testid={`find-similar-${book.id}`}
+            onClick={(e) => { e.stopPropagation(); onSimilar(book); }}
             className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors px-2 py-1 rounded hover:bg-primary/10">
             <Shuffle size={10} /> Similar
           </button>
