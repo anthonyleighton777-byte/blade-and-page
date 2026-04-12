@@ -489,26 +489,34 @@ function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
           <div className="flex items-center gap-1.5"><Users size={11} className="text-blue-400 flex-shrink-0" /><ScoreDots score={book.characterScore} color="#60a5fa" /></div>
         </div>
 
-        {/* Similar button — right-aligned above the stars */}
-        <div className="flex justify-end">
+        {/* Stars + Similar — full width row, stars scale to fit */}
+        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+          {/* 10 stars share all available space equally */}
+          <div className="flex flex-1 min-w-0">
+            {isRead && book.userRating
+              ? Array.from({ length: 10 }).map((_, i) => (
+                  <svg key={i} viewBox="0 0 24 24" className={`flex-1 min-w-0 ${ i < book.userRating!.rating ? "text-yellow-400" : "text-muted-foreground/30"}`} fill={i < book.userRating!.rating ? "currentColor" : "none"} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
+                  </svg>
+                ))
+              : Array.from({ length: 10 }).map((_, i) => (
+                  <svg key={i} viewBox="0 0 24 24" className="flex-1 min-w-0 text-muted-foreground/25 group-hover:text-muted-foreground/50 transition-colors" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
+                  </svg>
+                ))
+            }
+          </div>
+          {/* Rating label or tap hint */}
+          {isRead && book.userRating
+            ? <span className="text-[10px] text-muted-foreground font-mono flex-shrink-0">{book.userRating.rating}/10</span>
+            : <span className="text-[10px] text-muted-foreground/40 group-hover:text-muted-foreground/70 transition-colors flex-shrink-0">tap</span>
+          }
+          {/* Similar button */}
           <button data-testid={`find-similar-${book.id}`}
             onClick={(e) => { e.stopPropagation(); onSimilar(book); }}
-            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors px-2 py-0.5 rounded hover:bg-primary/10">
+            className="flex-shrink-0 flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-primary transition-colors px-1.5 py-0.5 rounded hover:bg-primary/10">
             <Shuffle size={10} /> Similar
           </button>
-        </div>
-
-        {/* Stars — full width, no gaps so all 10 fit */}
-        <div className="flex items-center" onClick={e => e.stopPropagation()}>
-          {isRead && book.userRating
-            ? <StarRating value={book.userRating.rating} readonly size={32} />
-            : <>
-                {Array.from({ length: 10 }).map((_, i) => (
-                  <Star key={i} size={32} className="flex-1 text-muted-foreground/25 group-hover:text-muted-foreground/50 transition-colors" />
-                ))}
-                <span className="ml-1 text-[10px] text-muted-foreground/40 group-hover:text-muted-foreground/70 transition-colors whitespace-nowrap">tap to rate</span>
-              </>
-          }
         </div>
       </div>
     </div>
