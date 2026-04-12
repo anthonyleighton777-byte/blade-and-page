@@ -2,6 +2,50 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { db } from "./db";
+import { books, users, userRatings } from "@shared/schema";
+import { sql } from "drizzle-orm";
+
+// Auto-create tables on startup (safe to run repeatedly)
+function migrateDb() {
+  try {
+    db.run(sql`CREATE TABLE IF NOT EXISTS books (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      author TEXT NOT NULL,
+      genre TEXT NOT NULL,
+      subgenres TEXT NOT NULL DEFAULT '[]',
+      description TEXT NOT NULL,
+      martial_arts_score INTEGER NOT NULL DEFAULT 0,
+      magic_score INTEGER NOT NULL DEFAULT 0,
+      character_score INTEGER NOT NULL DEFAULT 0,
+      series_name TEXT,
+      series_book INTEGER,
+      cover_color TEXT NOT NULL DEFAULT '#1a1a2e',
+      cover_accent TEXT NOT NULL DEFAULT '#e94560',
+      publish_year INTEGER,
+      tags TEXT NOT NULL DEFAULT '[]'
+    )`);
+    db.run(sql`CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`);
+    db.run(sql`CREATE TABLE IF NOT EXISTS user_ratings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      book_id INTEGER NOT NULL,
+      rating INTEGER NOT NULL,
+      read INTEGER NOT NULL DEFAULT 1,
+      notes TEXT
+    )`);
+    console.log("[db] Tables ready.");
+  } catch (e) {
+    console.error("[db] Migration error:", e);
+  }
+}
+migrateDb();
 
 const app = express();
 const httpServer = createServer(app);
