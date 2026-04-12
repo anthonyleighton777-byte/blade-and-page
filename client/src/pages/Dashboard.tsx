@@ -12,7 +12,7 @@ import {
   BookOpen, Star, Swords, Sparkles, Users, SlidersHorizontal,
   Moon, Sun, TrendingUp, CheckCircle2, X, Flame, Zap, Search,
   Shuffle, ArrowLeft, ChevronDown, ChevronUp, Globe, Plus, Loader2,
-  LogIn, LogOut, UserPlus, PenLine, BarChart2, Tag, Wand2
+  LogIn, LogOut, UserPlus, PenLine, BarChart2, Tag, Wand2, Compass, RefreshCw
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -789,9 +789,10 @@ function SearchOnlineModal({ open, onClose }: { open: boolean; onClose: () => vo
 }
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
-function Sidebar({ recommendations, similarBooks, similarSource, onRate, onSimilar, onClearSimilar }:
+function Sidebar({ recommendations, similarBooks, similarSource, onRate, onSimilar, onClearSimilar, discoveries, onDiscover, isDiscovering }:
   { recommendations: BookData[]; similarBooks: BookData[]; similarSource: BookData | null;
-    onRate: (b: BookData) => void; onSimilar: (b: BookData) => void; onClearSimilar: () => void; }) {
+    onRate: (b: BookData) => void; onSimilar: (b: BookData) => void; onClearSimilar: () => void;
+    discoveries: BookData[]; onDiscover: () => void; isDiscovering: boolean; }) {
   const showing = similarSource ? "similar" : "recommendations";
   return (
     <div className="sticky top-24 space-y-4">
@@ -836,6 +837,60 @@ function Sidebar({ recommendations, similarBooks, similarSource, onRate, onSimil
         }
       </div>
 
+      {/* ── Auto-Discovery Panel ── */}
+      <div className="rounded-xl border border-border/50 bg-card overflow-hidden">
+        <div className="p-4 border-b border-border/30 bg-gradient-to-r from-emerald-900/20 to-teal-900/20">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Compass size={15} className="text-emerald-400" />
+              <h3 className="font-semibold text-sm text-foreground">New Discoveries</h3>
+            </div>
+            <button
+              onClick={onDiscover}
+              disabled={isDiscovering}
+              data-testid="discover-button"
+              className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md bg-emerald-900/30 border border-emerald-700/40 text-emerald-300 hover:bg-emerald-800/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isDiscovering ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
+              {isDiscovering ? "Searching…" : "Find Books"}
+            </button>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1">
+            {discoveries.length > 0
+              ? `${discoveries.length} books added from Open Library based on your taste profile`
+              : "Auto-finds books matching the community's taste profile"}
+          </p>
+        </div>
+        {discoveries.length === 0 ? (
+          <div className="p-6 text-center">
+            <Compass size={28} className="text-muted-foreground/20 mx-auto mb-3" />
+            <p className="text-xs text-muted-foreground">Rate 3+ books, then tap Find Books to discover new titles automatically added to the library.</p>
+          </div>
+        ) : (
+          <div className="p-2 space-y-1 max-h-[300px] overflow-y-auto">
+            {discoveries.map(b => (
+              <div key={b.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-accent/5 transition-colors">
+                <div className="w-7 h-9 rounded flex-shrink-0 flex items-center justify-center text-[8px] font-bold text-white"
+                  style={{ background: `linear-gradient(135deg, ${b.coverColor}, ${b.coverAccent})` }}>
+                  ✦
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-foreground truncate">{b.title}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{b.author}</p>
+                  <span className="inline-block text-[9px] px-1 py-px rounded bg-emerald-900/30 text-emerald-400 border border-emerald-800/40 mt-0.5">✦ New</span>
+                </div>
+                <button
+                  onClick={() => onRate(b)}
+                  className="flex-shrink-0 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                >
+                  <Star size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="rounded-xl border border-border/50 bg-card p-4 space-y-3">
         <h3 className="text-xs font-semibold text-foreground">Score Legend</h3>
         <div className="space-y-1.5 text-xs text-muted-foreground">
@@ -864,6 +919,7 @@ function Sidebar({ recommendations, similarBooks, similarSource, onRate, onSimil
 function DashboardInner() {
   const { theme, toggle } = useTheme();
   const { user, logout } = useAuth();
+  const { toast } = useToast();
   const [selectedGenre, setSelectedGenre] = useState("all");
   const [sortBy, setSortBy] = useState("default");
   const [ratingModal, setRatingModal] = useState<BookData | null>(null);
@@ -875,9 +931,31 @@ function DashboardInner() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showAddBook, setShowAddBook] = useState(false);
   const [showSearchOnline, setShowSearchOnline] = useState(false);
+  const [discoveries, setDiscoveries] = useState<BookData[]>([]);
 
   const { data: books = [], isLoading } = useQuery<BookData[]>({ queryKey: ["/api/books"] });
   const { data: recommendations = [] } = useQuery<BookData[]>({ queryKey: ["/api/recommendations"] });
+
+  const discoverMutation = useMutation({
+    mutationFn: () => apiRequest("GET", "/api/discover"),
+    onSuccess: (data: any) => {
+      if (data.added && data.added.length > 0) {
+        setDiscoveries(prev => {
+          const existingIds = new Set(prev.map((b: BookData) => b.id));
+          const newBooks = data.added.filter((b: BookData) => !existingIds.has(b.id));
+          return [...newBooks, ...prev];
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/books"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
+        toast({ title: `✦ ${data.added.length} new book${data.added.length > 1 ? 's' : ''} discovered!`, description: `Added from Open Library based on community taste profile.` });
+      } else {
+        toast({ title: "Discovery complete", description: data.queriesUsed ? `Searched: ${data.queriesUsed.join(', ')} — no new matches found yet.` : "Rate 3+ books to build a taste profile first." });
+      }
+    },
+    onError: () => {
+      toast({ title: "Discovery failed", description: "Couldn't reach Open Library. Try again later.", variant: "destructive" });
+    },
+  });
   const { data: similarBooks = [] } = useQuery<BookData[]>({
     queryKey: ["/api/similar", similarSource?.id],
     enabled: !!similarSource,
@@ -1110,7 +1188,10 @@ function DashboardInner() {
         <aside className="hidden xl:block w-72 flex-shrink-0">
           <Sidebar recommendations={recommendations} similarBooks={similarBooks}
             similarSource={similarSource} onRate={b => { if (!user) setShowAuthModal(true); else setRatingModal(b); }}
-            onSimilar={handleSimilar} onClearSimilar={() => setSimilarSource(null)} />
+            onSimilar={handleSimilar} onClearSimilar={() => setSimilarSource(null)}
+            discoveries={discoveries}
+            onDiscover={() => discoverMutation.mutate()}
+            isDiscovering={discoverMutation.isPending} />
         </aside>
       </div>
 
