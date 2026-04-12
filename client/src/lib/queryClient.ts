@@ -1,6 +1,8 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
+// When deployed on Render/Railway, API_BASE is empty and relative URLs work because
+// Express serves both the API and the static frontend on the same port.
 
 // Auth token store — set by AuthProvider after login
 let _authToken: string | null = null;
