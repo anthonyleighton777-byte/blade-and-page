@@ -1,4 +1,4 @@
-import { useState, useMemo, createContext, useContext, useRef } from "react";
+import { useState, useMemo, createContext, useContext, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, setAuthToken } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -405,17 +405,24 @@ function MiniBookRow({ book, onRate, onSimilar }: { book: BookData; onRate: (b: 
 }
 
 // ─── Book Card ────────────────────────────────────────────────────────────────
-function BookCard({ book, onRate, onSimilar, onCommunity }: {
+function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
   book: BookData; onRate: (b: BookData) => void;
   onSimilar: (b: BookData) => void; onCommunity: (b: BookData) => void;
+  forYou?: boolean;
 }) {
   const isRead = !!book.userRating;
   const [expanded, setExpanded] = useState(false);
 
   return (
     <div data-testid={`book-card-${book.id}`}
-      className={`relative rounded-xl border p-4 flex gap-4 transition-all duration-200 hover:border-primary/40 group ${isRead ? "read-overlay" : "bg-card border-border/50"}`}>
-      {isRead && <div className="absolute top-3 right-3 z-10"><CheckCircle2 size={16} className="text-primary" /></div>}
+      className={`relative rounded-xl border p-4 flex gap-4 transition-all duration-200 hover:border-primary/40 group ${isRead ? "read-overlay" : "bg-card border-border/50"} ${forYou ? "ring-1 ring-cyan-500/40 shadow-[0_0_12px_rgba(6,182,212,0.15)]" : ""}`}>
+      {forYou && (
+        <div className="absolute top-3 left-3 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-cyan-900/40 border border-cyan-600/30">
+          <Compass size={10} className="text-cyan-400" />
+          <span className="text-[9px] font-semibold text-cyan-300">For You</span>
+        </div>
+      )}
+      {isRead && <div className={`absolute top-3 ${forYou ? 'right-3' : 'right-3'} z-10`}><CheckCircle2 size={16} className="text-primary" /></div>}
 
       <div onClick={() => onRate(book)} className="cursor-pointer">
         <BookCover book={book} size="md" />
@@ -877,7 +884,7 @@ function Sidebar({ recommendations, similarBooks, similarSource, onRate, onSimil
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-foreground truncate">{b.title}</p>
                   <p className="text-[10px] text-muted-foreground truncate">{b.author}</p>
-                  <span className="inline-block text-[9px] px-1 py-px rounded bg-emerald-900/30 text-emerald-400 border border-emerald-800/40 mt-0.5">✦ New</span>
+                  <span className="inline-block text-[9px] px-1 py-px rounded bg-emerald-900/30 text-emerald-400 border border-emerald-800/40 mt-0.5">✦ Group Pick</span>
                 </div>
                 <button
                   onClick={() => onRate(b)}
@@ -932,12 +939,15 @@ function DashboardInner() {
   const [showAddBook, setShowAddBook] = useState(false);
   const [showSearchOnline, setShowSearchOnline] = useState(false);
   const [discoveries, setDiscoveries] = useState<BookData[]>([]);
+  const [forYouIds, setForYouIds] = useState<Set<number>>(new Set());
+  const autoDiscoveredRef = useRef(false);
 
   const { data: books = [], isLoading } = useQuery<BookData[]>({ queryKey: ["/api/books"] });
   const { data: recommendations = [] } = useQuery<BookData[]>({ queryKey: ["/api/recommendations"] });
 
+  // Group discovery — finds books for the whole community
   const discoverMutation = useMutation({
-    mutationFn: () => apiRequest("GET", "/api/discover"),
+    mutationFn: () => apiRequest("GET", "/api/discover/group"),
     onSuccess: (data: any) => {
       if (data.added && data.added.length > 0) {
         setDiscoveries(prev => {
@@ -947,15 +957,50 @@ function DashboardInner() {
         });
         queryClient.invalidateQueries({ queryKey: ["/api/books"] });
         queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
-        toast({ title: `✦ ${data.added.length} new book${data.added.length > 1 ? 's' : ''} discovered!`, description: `Added from Open Library based on community taste profile.` });
-      } else {
-        toast({ title: "Discovery complete", description: data.queriesUsed ? `Searched: ${data.queriesUsed.join(', ')} — no new matches found yet.` : "Rate 3+ books to build a taste profile first." });
+        toast({ title: `✦ ${data.added.length} new group pick${data.added.length > 1 ? 's' : ''} discovered!`, description: `Added from Open Library based on the community's taste.` });
       }
     },
-    onError: () => {
-      toast({ title: "Discovery failed", description: "Couldn't reach Open Library. Try again later.", variant: "destructive" });
-    },
+    onError: () => {},
   });
+
+  // Personal discovery — finds books tailored to YOU, highlights them in the grid
+  const personalDiscoverMutation = useMutation({
+    mutationFn: () => apiRequest("GET", "/api/discover/personal"),
+    onSuccess: (data: any) => {
+      if (data.forYouIds && data.forYouIds.length > 0) {
+        setForYouIds(new Set(data.forYouIds));
+      }
+      if (data.added && data.added.length > 0) {
+        queryClient.invalidateQueries({ queryKey: ["/api/books"] });
+        toast({ title: `✦ ${data.added.length} personal pick${data.added.length > 1 ? 's' : ''} found!`, description: `Books matched to your individual taste.` });
+      }
+    },
+    onError: () => {},
+  });
+
+  // Auto-discover once per session when the app loads
+  useEffect(() => {
+    if (autoDiscoveredRef.current) return;
+    autoDiscoveredRef.current = true;
+    // Small delay to let the initial data load first
+    const timer = setTimeout(() => {
+      discoverMutation.mutate();
+      if (user) personalDiscoverMutation.mutate();
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-run personal discovery when user logs in
+  const prevUserRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (user && user.userId !== prevUserRef.current) {
+      prevUserRef.current = user.userId;
+      personalDiscoverMutation.mutate();
+    } else if (!user) {
+      prevUserRef.current = null;
+      setForYouIds(new Set());
+    }
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
   const { data: similarBooks = [] } = useQuery<BookData[]>({
     queryKey: ["/api/similar", similarSource?.id],
     enabled: !!similarSource,
@@ -1178,6 +1223,7 @@ function DashboardInner() {
                   onRate={b => { if (!user) { setShowAuthModal(true); } else { setRatingModal(b); } }}
                   onSimilar={handleSimilar}
                   onCommunity={setCommunityModal}
+                  forYou={forYouIds.has(book.id)}
                 />
               ))}
             </div>

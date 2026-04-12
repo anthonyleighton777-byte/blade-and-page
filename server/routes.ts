@@ -1079,141 +1079,104 @@ export function registerRoutes(httpServer: any, app: Express): Server {
   });
 
   // ── Auto-Discovery Engine ────────────────────────────────────────────────
-  // GET /api/discover — builds taste profile from ALL ratings, searches Open
-  // Library for matching books, deduplicates against existing library, adds
-  // the best matches automatically. Returns newly added books.
-  app.get("/api/discover", (req, res) => {
-    const allBooks = storage.getAllBooks();
-    const allRatings = storage.getAllRatings();
-
-    // Need at least 3 ratings to build a meaningful profile
-    if (allRatings.length < 3) {
-      res.json({ added: [], message: "Need at least 3 ratings to discover new books." });
-      return;
-    }
-
-    // Build taste profile — top tags, genres, and attribute preferences
+  // ── Shared discovery helpers ─────────────────────────────────────────────────
+  function inferGenre(subjects: string[]): string {
+    const s = subjects.join(" ").toLowerCase();
+    if (s.includes("wuxia") || s.includes("martial arts")) return "wuxia";
+    if (s.includes("litrpg") || s.includes("dungeon") || s.includes("game")) return "litrpg";
+    if (s.includes("urban fantasy") || s.includes("contemporary fantasy")) return "urban";
+    if (s.includes("cultivation") || s.includes("xianxia") || s.includes("immortal")) return "cultivation";
+    if (s.includes("progression")) return "progression";
+    return "high_fantasy";
+  }
+  function coverColors(genre: string): [string, string] {
+    const map: Record<string, [string, string]> = {
+      wuxia: ["#0f2027", "#c94b4b"], cultivation: ["#0d1b2a", "#56a0d3"],
+      litrpg: ["#0a1628", "#7c3aed"], urban: ["#1a1a2e", "#e94560"],
+      progression: ["#0f1b0f", "#22c55e"], high_fantasy: ["#1e1433", "#c8973a"],
+    };
+    return map[genre] || ["#1a1a2e", "#c8973a"];
+  }
+  interface TasteProfile {
+    tagScores: Record<string, number>;
+    genreScores: Record<string, number>;
+    topTags: string[];
+    topGenres: string[];
+  }
+  function buildTasteProfile(ratings: any[], allBooks: any[]): TasteProfile {
     const tagScores: Record<string, number> = {};
     const genreScores: Record<string, number> = {};
-    const attrPrefs = { martial: 0, magic: 0, character: 0 };
-
-    for (const rating of allRatings) {
+    for (const rating of ratings) {
       const book = allBooks.find((b: any) => b.id === rating.bookId);
       if (!book) continue;
-      const weight = (rating.rating - 5) / 5; // -1..+1
+      const weight = (rating.rating - 5) / 5;
       genreScores[book.genre] = (genreScores[book.genre] || 0) + weight;
       const tags: string[] = JSON.parse(book.tags);
       for (const tag of tags) tagScores[tag] = (tagScores[tag] || 0) + weight;
-      const nr = rating.rating / 10;
-      attrPrefs.martial += book.martialArtsScore * nr;
-      attrPrefs.magic += book.magicScore * nr;
-      attrPrefs.character += book.characterScore * nr;
     }
-
-    const rc = allRatings.length;
-    attrPrefs.martial /= rc;
-    attrPrefs.magic /= rc;
-    attrPrefs.character /= rc;
-
-    // Pick top 3 tags and top 2 genres (positively scored) as search queries
-    const topTags = Object.entries(tagScores)
-      .filter(([, s]) => s > 0)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 3)
-      .map(([t]) => t);
-    const topGenres = Object.entries(genreScores)
-      .filter(([, s]) => s > 0)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 2)
-      .map(([g]) => g.replace(/_/g, " "));
-
-    // Build 2 search queries from taste profile
+    const topTags = Object.entries(tagScores).filter(([, s]) => s > 0)
+      .sort(([, a], [, b]) => b - a).slice(0, 3).map(([t]) => t);
+    const topGenres = Object.entries(genreScores).filter(([, s]) => s > 0)
+      .sort(([, a], [, b]) => b - a).slice(0, 2).map(([g]) => g.replace(/_/g, " "));
+    return { tagScores, genreScores, topTags, topGenres };
+  }
+  function buildQueries(profile: TasteProfile): string[] {
     const queries: string[] = [];
-    if (topTags.length > 0) queries.push(topTags.slice(0, 2).join(" "));
-    if (topGenres.length > 0) queries.push(topGenres[0] + " fantasy");
+    if (profile.topTags.length > 0) queries.push(profile.topTags.slice(0, 2).join(" "));
+    if (profile.topGenres.length > 0) queries.push(profile.topGenres[0] + " fantasy");
     if (queries.length === 0) queries.push("martial arts fantasy");
-
-    // Existing titles (lowercase) for dedup
-    const existingTitles = new Set(allBooks.map((b: any) => b.title.toLowerCase().trim()));
-
-    // Helper: infer genre from subjects
-    function inferGenre(subjects: string[]): string {
-      const s = subjects.join(" ").toLowerCase();
-      if (s.includes("wuxia") || s.includes("martial arts")) return "wuxia";
-      if (s.includes("litrpg") || s.includes("dungeon") || s.includes("game")) return "litrpg";
-      if (s.includes("urban fantasy") || s.includes("contemporary fantasy")) return "urban";
-      if (s.includes("cultivation") || s.includes("xianxia") || s.includes("immortal")) return "cultivation";
-      if (s.includes("progression")) return "progression";
-      return "high_fantasy";
-    }
-    function coverColors(genre: string): [string, string] {
-      const map: Record<string, [string, string]> = {
-        wuxia: ["#0f2027", "#c94b4b"], cultivation: ["#0d1b2a", "#56a0d3"],
-        litrpg: ["#0a1628", "#7c3aed"], urban: ["#1a1a2e", "#e94560"],
-        progression: ["#0f1b0f", "#22c55e"], high_fantasy: ["#1e1433", "#c8973a"],
-      };
-      return map[genre] || ["#1a1a2e", "#c8973a"];
-    }
-
-    // Fetch both queries in parallel then process results
+    return queries;
+  }
+  function scoreCandidate(doc: any, profile: TasteProfile): { doc: any; genre: string; tags: string[]; subjects: string[]; score: number } {
+    const subjects: string[] = (doc.subject || []).slice(0, 8);
+    const tags = subjects.map((s: string) => s.toLowerCase());
+    let score = 0;
+    for (const tag of tags) score += (profile.tagScores[tag] || 0) * 1.5;
+    const genre = inferGenre(subjects);
+    score += (profile.genreScores[genre] || 0) * 3;
+    return { doc, genre, tags, subjects, score };
+  }
+  function addDiscoveredBook(doc: any, genre: string, tags: string[], subjects: string[]): any {
+    const [coverColor, coverAccent] = coverColors(genre);
+    const s = subjects.join(" ").toLowerCase();
+    const martialArtsScore = s.includes("martial") || s.includes("combat") || s.includes("fighting") ? 4 : 2;
+    const magicScore = s.includes("magic") || s.includes("fantasy") || s.includes("power") ? 4 : 2;
+    const characterScore = s.includes("character") || s.includes("coming of age") || s.includes("growth") ? 4 : 3;
+    const book = storage.addBook({
+      title: doc.title,
+      author: (doc.author_name || ["Unknown Author"])[0],
+      genre,
+      subgenres: JSON.stringify([genre]),
+      description: subjects.slice(0, 5).join(", ") || "Discovered by the recommendation engine.",
+      martialArtsScore, magicScore, characterScore,
+      seriesName: null, seriesBook: null,
+      coverColor, coverAccent,
+      publishYear: doc.first_publish_year || null,
+      tags: JSON.stringify(tags.slice(0, 6)),
+    });
+    return { ...book, subgenres: [genre], tags: tags.slice(0, 6), userRating: null, communityRating: null };
+  }
+  // Fetch Open Library + process results, then call done(added, queries, profile)
+  function runDiscovery(profile: TasteProfile, existingTitles: Set<string>, limit: number,
+    done: (added: any[], queries: string[], profile: TasteProfile) => void) {
+    const queries = buildQueries(profile);
     let completed = 0;
     const allDocs: any[] = [];
-    const added: any[] = [];
-
     const finish = () => {
-      // Deduplicate docs by title
       const seen = new Set<string>();
       const unique = allDocs.filter(doc => {
         const t = (doc.title || "").toLowerCase().trim();
         if (!t || seen.has(t) || existingTitles.has(t)) return false;
-        seen.add(t);
-        return true;
+        seen.add(t); return true;
       });
-
-      // Score each candidate against taste profile
-      const scored = unique.map(doc => {
-        const subjects: string[] = (doc.subject || []).slice(0, 8);
-        const tags = subjects.map((s: string) => s.toLowerCase());
-        let score = 0;
-        for (const tag of tags) score += (tagScores[tag] || 0) * 1.5;
-        const genre = inferGenre(subjects);
-        score += (genreScores[genre] || 0) * 3;
-        return { doc, genre, tags, subjects, score };
-      });
+      const scored = unique.map(doc => scoreCandidate(doc, profile));
       scored.sort((a, b) => b.score - a.score);
-
-      // Add top 5 new books to the library
-      for (const { doc, genre, tags, subjects } of scored.slice(0, 5)) {
-        const [coverColor, coverAccent] = coverColors(genre);
-        // Estimate attribute scores from subjects
-        const s = subjects.join(" ").toLowerCase();
-        const martialArtsScore = s.includes("martial") || s.includes("combat") || s.includes("fighting") ? 4 : 2;
-        const magicScore = s.includes("magic") || s.includes("fantasy") || s.includes("power") ? 4 : 2;
-        const characterScore = s.includes("character") || s.includes("coming of age") || s.includes("growth") ? 4 : 3;
-        try {
-          const book = storage.addBook({
-            title: doc.title,
-            author: (doc.author_name || ["Unknown Author"])[0],
-            genre,
-            subgenres: JSON.stringify([genre]),
-            description: subjects.slice(0, 5).join(", ") || "Discovered by the recommendation engine.",
-            martialArtsScore,
-            magicScore,
-            characterScore,
-            seriesName: null,
-            seriesBook: null,
-            coverColor,
-            coverAccent,
-            publishYear: doc.first_publish_year || null,
-            tags: JSON.stringify(tags.slice(0, 6)),
-          });
-          added.push({ ...book, subgenres: [genre], tags: tags.slice(0, 6), userRating: null, communityRating: null });
-        } catch { /* skip dupes from unique constraint */ }
+      const added: any[] = [];
+      for (const { doc, genre, tags, subjects } of scored.slice(0, limit)) {
+        try { added.push(addDiscoveredBook(doc, genre, tags, subjects)); } catch { /* skip dupes */ }
       }
-
-      res.json({ added, queriesUsed: queries, tasteProfile: { topTags, topGenres } });
+      done(added, queries, profile);
     };
-
     for (const q of queries) {
       const encoded = encodeURIComponent(q);
       const url = `https://openlibrary.org/search.json?q=${encoded}&limit=15&fields=title,author_name,first_publish_year,subject,cover_i,key`;
@@ -1221,18 +1184,76 @@ export function registerRoutes(httpServer: any, app: Express): Server {
         let data = "";
         olRes.on("data", (chunk) => { data += chunk; });
         olRes.on("end", () => {
-          try {
-            const json = JSON.parse(data);
-            allDocs.push(...(json.docs || []));
-          } catch { /* ignore parse errors */ }
+          try { allDocs.push(...(JSON.parse(data).docs || [])); } catch { }
           completed++;
           if (completed === queries.length) finish();
         });
-      }).on("error", () => {
-        completed++;
-        if (completed === queries.length) finish();
-      });
+      }).on("error", () => { completed++; if (completed === queries.length) finish(); });
     }
+  }
+  // Score an existing library book against a taste profile (for personal picks from existing library)
+  function scoreLibraryBook(book: any, profile: TasteProfile): number {
+    let score = 0;
+    score += (profile.genreScores[book.genre] || 0) * 3;
+    const tags: string[] = JSON.parse(book.tags);
+    for (const tag of tags) score += (profile.tagScores[tag] || 0) * 1.5;
+    return score;
+  }
+
+  // ── GET /api/discover/group — community taste profile → discover new books ──
+  app.get("/api/discover/group", (req, res) => {
+    const allBooks = storage.getAllBooks();
+    const allRatings = storage.getAllRatings();
+    if (allRatings.length < 3) {
+      res.json({ added: [], personalPicks: [], message: "Need at least 3 community ratings." });
+      return;
+    }
+    const profile = buildTasteProfile(allRatings, allBooks);
+    const existingTitles = new Set(allBooks.map((b: any) => b.title.toLowerCase().trim()));
+    runDiscovery(profile, existingTitles, 5, (added, queries, prof) => {
+      res.json({ added, queriesUsed: queries, tasteProfile: { topTags: prof.topTags, topGenres: prof.topGenres } });
+    });
+  });
+
+  // ── GET /api/discover/personal — YOUR taste profile → discover + recommend ──
+  // Returns: { added (new books from Open Library), forYouIds (existing book IDs matching your taste) }
+  app.get("/api/discover/personal", (req, res) => {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    const userId = getSession(token);
+    if (!userId) { res.json({ added: [], forYouIds: [], message: "Sign in to get personal picks." }); return; }
+
+    const allBooks = storage.getAllBooks();
+    const myRatings = storage.getUserRatings(userId);
+    if (myRatings.length < 2) {
+      res.json({ added: [], forYouIds: [], message: "Rate at least 2 books for personal discovery." });
+      return;
+    }
+
+    const profile = buildTasteProfile(myRatings, allBooks);
+    const existingTitles = new Set(allBooks.map((b: any) => b.title.toLowerCase().trim()));
+    const myRatedIds = new Set(myRatings.map(r => r.bookId));
+
+    // Score existing unread books against personal profile
+    const existingScored = allBooks
+      .filter((b: any) => !myRatedIds.has(b.id))
+      .map((b: any) => ({ id: b.id, score: scoreLibraryBook(b, profile) }))
+      .filter(x => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+    const forYouIds = existingScored.map(x => x.id);
+
+    // Also search Open Library for personal matches (top 3)
+    runDiscovery(profile, existingTitles, 3, (added, queries, prof) => {
+      // Include newly added book IDs in forYouIds too
+      const allForYouIds = [...added.map((b: any) => b.id), ...forYouIds];
+      res.json({ added, forYouIds: allForYouIds, queriesUsed: queries,
+        tasteProfile: { topTags: prof.topTags, topGenres: prof.topGenres } });
+    });
+  });
+
+  // Keep legacy /api/discover working (redirects to group)
+  app.get("/api/discover", (req, res) => {
+    res.redirect("/api/discover/group");
   });
 
   // ── Open Library search proxy ──────────────────────────────────────────────
