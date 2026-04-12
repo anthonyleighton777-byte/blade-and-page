@@ -504,7 +504,7 @@ function RatingModal({ book, onClose, requireAuth }: { book: BookData | null; on
 
   // Fetch free ebook / audiobook links for this book
   const { data: freeLinks, isLoading: linksLoading } = useQuery<{
-    ebookUrl: string | null; borrowUrl: string | null; audioUrl: string | null; iaUrl?: string | null;
+    ebookUrl: string | null; borrowUrl: string | null; audioUrl: string | null; iaUrl?: string | null; standardEbookUrl?: string | null;
   }>({
     queryKey: ["/api/books", book?.id, "free-links"],
     queryFn: async () => {
@@ -610,7 +610,7 @@ function RatingModal({ book, onClose, requireAuth }: { book: BookData | null; on
           <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
             <Loader2 size={12} className="animate-spin" /> Checking for free copies…
           </div>
-        ) : (freeLinks?.ebookUrl || freeLinks?.borrowUrl || freeLinks?.iaUrl || freeLinks?.audioUrl) ? (
+        ) : (freeLinks?.ebookUrl || freeLinks?.borrowUrl || freeLinks?.iaUrl || freeLinks?.audioUrl || freeLinks?.standardEbookUrl) ? (
           <div className="rounded-lg border border-border/40 bg-muted/20 p-3 space-y-2">
             <p className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
               <BookOpen size={12} className="text-primary" /> Free to Read / Listen
@@ -632,6 +632,12 @@ function RatingModal({ book, onClose, requireAuth }: { book: BookData | null; on
                 <a href={freeLinks.iaUrl} target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md bg-blue-900/20 border border-blue-700/30 text-blue-400 hover:bg-blue-900/30 transition-colors">
                   <Globe size={11} /> Read on Archive.org
+                </a>
+              )}
+              {freeLinks?.standardEbookUrl && (
+                <a href={freeLinks.standardEbookUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md bg-emerald-900/20 border border-emerald-700/30 text-emerald-400 hover:bg-emerald-900/30 transition-colors">
+                  <BookOpen size={11} /> Standard Ebooks (Free)
                 </a>
               )}
               {freeLinks?.audioUrl && (

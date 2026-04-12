@@ -1267,8 +1267,8 @@ export function registerRoutes(httpServer: any, app: Express): Server {
 
     const title = book.title;
     const author = book.author;
-    const results: any = { ebookUrl: null, borrowUrl: null, audioUrl: null };
-    let pending = 2;
+    const results: any = { ebookUrl: null, borrowUrl: null, audioUrl: null, standardEbookUrl: null };
+    let pending = 3;
     const done = () => { if (--pending === 0) res.json(results); };
 
     // 1) Open Library — search for this exact title+author, check availability
@@ -1326,6 +1326,21 @@ export function registerRoutes(httpServer: any, app: Express): Server {
         } catch { }
         done();
       });
+    }).on("error", () => done());
+
+    // 3) Standard Ebooks — high-quality, beautifully formatted public domain ebooks
+    // Standard Ebooks uses slug format: author-name/title-slug on their catalog page
+    const seAuthorSlug = author.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const seTitleSlug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const seUrl = `https://standardebooks.org/ebooks/${seAuthorSlug}/${seTitleSlug}`;
+    https.get(seUrl, { headers: { "User-Agent": "BladeAndPage/1.0" } }, (r) => {
+      // Standard Ebooks returns 200 if the book exists, 404 if not
+      if (r.statusCode === 200) {
+        results.standardEbookUrl = seUrl;
+      }
+      // Drain response
+      r.resume();
+      r.on("end", () => done());
     }).on("error", () => done());
   });
 
