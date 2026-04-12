@@ -353,7 +353,7 @@ function ScoreDots({ score, color }: { score: number; color: string }) {
 }
 
 // ─── Star Rating ──────────────────────────────────────────────────────────────
-function StarRating({ value, onChange, readonly = false }: { value: number; onChange?: (v: number) => void; readonly?: boolean }) {
+function StarRating({ value, onChange, readonly = false, size: starSize = 18 }: { value: number; onChange?: (v: number) => void; readonly?: boolean; size?: number }) {
   const [hovered, setHovered] = useState(0);
   const display = readonly ? value : (hovered || value);
   return (
@@ -363,7 +363,7 @@ function StarRating({ value, onChange, readonly = false }: { value: number; onCh
           className={`transition-all ${readonly ? "cursor-default" : "cursor-pointer hover:scale-110"}`}
           onMouseEnter={() => !readonly && setHovered(i + 1)}
           onClick={() => onChange?.(i + 1)}>
-          <Star size={14} className={i < display ? "text-yellow-400" : "text-muted-foreground/30"} fill={i < display ? "currentColor" : "none"} />
+          <Star size={starSize} className={i < display ? "text-yellow-400" : "text-muted-foreground/30"} fill={i < display ? "currentColor" : "none"} />
         </button>
       ))}
       {value > 0 && <span className="ml-1 text-xs text-muted-foreground font-mono">{value}/10</span>}
@@ -491,13 +491,13 @@ function BookCard({ book, onRate, onSimilar, onCommunity, forYou }: {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-0.5">
             {isRead && book.userRating
-              ? <StarRating value={book.userRating.rating} readonly />
+              ? <StarRating value={book.userRating.rating} readonly size={16} />
               : Array.from({ length: 10 }).map((_, i) => (
-                  <Star key={i} size={12} className="text-muted-foreground/25 group-hover:text-muted-foreground/50 transition-colors" />
+                  <Star key={i} size={16} className="text-muted-foreground/25 group-hover:text-muted-foreground/50 transition-colors" />
                 ))
             }
             {!isRead && (
-              <span className="ml-1.5 text-[9px] text-muted-foreground/40 group-hover:text-muted-foreground/70 transition-colors">rate</span>
+              <span className="ml-1.5 text-[10px] text-muted-foreground/40 group-hover:text-muted-foreground/70 transition-colors">tap to rate</span>
             )}
           </div>
           <button data-testid={`find-similar-${book.id}`}
@@ -669,7 +669,7 @@ function FreeBooksTab({ onRate }: { onRate: (b: BookData) => void }) {
 }
 
 // ─── Rating Modal ─────────────────────────────────────────────────────────────
-function RatingModal({ book, onClose, requireAuth }: { book: BookData | null; onClose: () => void; requireAuth: () => void }) {
+function RatingModal({ book, onClose, requireAuth, allBooks }: { book: BookData | null; onClose: () => void; requireAuth: () => void; allBooks: BookData[] }) {
   const { user } = useAuth();
   const { toast } = useToast();
   const [rating, setRating] = useState(book?.userRating?.rating || 5);
@@ -689,13 +689,31 @@ function RatingModal({ book, onClose, requireAuth }: { book: BookData | null; on
     staleTime: 1000 * 60 * 60, // cache for 1 hour
   });
 
+  const [applyToSeries, setApplyToSeries] = useState(false);
+
+  // Books in the same series (excluding this one)
+  const seriesSiblings = useMemo(() => {
+    if (!book?.seriesName) return [];
+    return allBooks.filter(b => b.id !== book.id && b.seriesName === book.seriesName);
+  }, [book, allBooks]);
+
   const rateMutation = useMutation({
-    mutationFn: async (data: { bookId: number; rating: number; read: number }) =>
-      apiRequest("POST", "/api/ratings", data),
+    mutationFn: async (data: { bookId: number; rating: number; read: number }) => {
+      await apiRequest("POST", "/api/ratings", data);
+      // Apply to series siblings if checkbox is ticked
+      if (applyToSeries && book?.seriesName) {
+        await Promise.all(
+          seriesSiblings.map(b => apiRequest("POST", "/api/ratings", { bookId: b.id, rating: data.rating, read: 1 }))
+        );
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/books"] });
       queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
-      toast({ title: "Rating saved!", description: `"${book?.title}" — ${rating}/10` });
+      const seriesMsg = applyToSeries && seriesSiblings.length > 0
+        ? ` + ${seriesSiblings.length} other${seriesSiblings.length > 1 ? "s" : ""} in series`
+        : "";
+      toast({ title: "Rating saved!", description: `"${book?.title}"${seriesMsg} — ${rating}/10` });
       onClose();
     },
   });
@@ -776,7 +794,28 @@ function RatingModal({ book, onClose, requireAuth }: { book: BookData | null; on
           <div className="flex justify-between text-[10px] text-muted-foreground">
             <span>1 — Pass</span><span>5 — Decent</span><span>10 — Masterpiece</span>
           </div>
-          <StarRating value={rating} onChange={setRating} />
+          <StarRating value={rating} onChange={setRating} size={20} />
+
+          {/* Apply to whole series */}
+          {seriesSiblings.length > 0 && (
+            <button
+              onClick={() => setApplyToSeries(v => !v)}
+              className={`flex items-center gap-2 w-full text-left px-3 py-2 rounded-lg border transition-all ${
+                applyToSeries
+                  ? "bg-primary/15 border-primary/50 text-primary"
+                  : "bg-muted/20 border-border/40 text-muted-foreground hover:border-primary/30 hover:text-foreground"
+              }`}>
+              <div className={`w-4 h-4 rounded flex items-center justify-center border flex-shrink-0 transition-all ${
+                applyToSeries ? "bg-primary border-primary" : "border-muted-foreground/40"
+              }`}>
+                {applyToSeries && <CheckCircle2 size={10} className="text-primary-foreground" />}
+              </div>
+              <div className="text-xs leading-tight">
+                <span className="font-medium">Apply to whole series</span>
+                <span className="ml-1 text-[10px] opacity-70">({seriesSiblings.length} other book{seriesSiblings.length > 1 ? "s" : ""} in {book?.seriesName})</span>
+              </div>
+            </button>
+          )}
         </div>
 
         {/* Free + Buy links */}
@@ -1520,7 +1559,7 @@ function DashboardInner() {
       <AuthModal open={showAuthModal} onClose={() => setShowAuthModal(false)} />
       <AddBookModal open={showAddBook} onClose={() => setShowAddBook(false)} />
       <SearchOnlineModal open={showSearchOnline} onClose={() => setShowSearchOnline(false)} />
-      <RatingModal book={ratingModal} onClose={() => setRatingModal(null)} requireAuth={() => setShowAuthModal(true)} />
+      <RatingModal book={ratingModal} onClose={() => setRatingModal(null)} requireAuth={() => setShowAuthModal(true)} allBooks={books} />
       <CommunityModal book={communityModal} onClose={() => setCommunityModal(null)} />
     </div>
   );
