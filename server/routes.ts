@@ -1260,5 +1260,74 @@ export function registerRoutes(httpServer: any, app: Express): Server {
     }).on("error", (err: any) => res.status(500).json({ error: err.message }));
   });
 
+  // ── GET /api/books/:id/free-links — check Open Library availability + LibriVox ──
+  app.get("/api/books/:id/free-links", (req, res) => {
+    const book = storage.getBook(Number(req.params.id));
+    if (!book) { res.status(404).json({ error: "Book not found" }); return; }
+
+    const title = book.title;
+    const author = book.author;
+    const results: any = { ebookUrl: null, borrowUrl: null, audioUrl: null };
+    let pending = 2;
+    const done = () => { if (--pending === 0) res.json(results); };
+
+    // 1) Open Library — search for this exact title+author, check availability
+    const olQ = encodeURIComponent(`${title} ${author}`);
+    const olUrl = `https://openlibrary.org/search.json?q=${olQ}&limit=5&fields=key,title,author_name,ia,ebook_access,lending_edition_s`;
+    https.get(olUrl, { headers: { "User-Agent": "BladeAndPage/1.0" } }, (r) => {
+      let d = "";
+      r.on("data", c => d += c);
+      r.on("end", () => {
+        try {
+          const json = JSON.parse(d);
+          const docs = json.docs || [];
+          // Find best match (title contains our title)
+          const match = docs.find((doc: any) =>
+            (doc.title || "").toLowerCase().includes(title.toLowerCase().slice(0, 15))
+          ) || docs[0];
+          if (match) {
+            const access = match.ebook_access || "";
+            if (access === "public") {
+              // Freely readable on Open Library
+              const ia = match.ia?.[0];
+              results.ebookUrl = ia
+                ? `https://archive.org/embed/${ia}`
+                : `https://openlibrary.org${match.key}`;
+            } else if (access === "borrowable" || match.lending_edition_s) {
+              // Can borrow for free (1-hour loan)
+              results.borrowUrl = `https://openlibrary.org${match.key}`;
+            }
+            // Also check Internet Archive directly
+            if (!results.ebookUrl && match.ia?.[0]) {
+              results.iaUrl = `https://archive.org/details/${match.ia[0]}`;
+            }
+          }
+        } catch { }
+        done();
+      });
+    }).on("error", () => done());
+
+    // 2) LibriVox — free public domain audiobooks
+    const lvQ = encodeURIComponent(title);
+    const lvUrl = `https://librivox.org/api/feed/audiobooks?title=${lvQ}&format=json&extended=1&limit=3`;
+    https.get(lvUrl, { headers: { "User-Agent": "BladeAndPage/1.0" } }, (r) => {
+      let d = "";
+      r.on("data", c => d += c);
+      r.on("end", () => {
+        try {
+          const json = JSON.parse(d);
+          const books = json.books || [];
+          const match = books.find((b: any) =>
+            (b.title || "").toLowerCase().includes(title.toLowerCase().slice(0, 12))
+          );
+          if (match) {
+            results.audioUrl = match.url_librivox || `https://librivox.org/${match.id}`;
+          }
+        } catch { }
+        done();
+      });
+    }).on("error", () => done());
+  });
+
   return httpServer;
 }

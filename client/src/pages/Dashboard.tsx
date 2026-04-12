@@ -502,6 +502,19 @@ function RatingModal({ book, onClose, requireAuth }: { book: BookData | null; on
   const { toast } = useToast();
   const [rating, setRating] = useState(book?.userRating?.rating || 5);
 
+  // Fetch free ebook / audiobook links for this book
+  const { data: freeLinks, isLoading: linksLoading } = useQuery<{
+    ebookUrl: string | null; borrowUrl: string | null; audioUrl: string | null; iaUrl?: string | null;
+  }>({
+    queryKey: ["/api/books", book?.id, "free-links"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/books/${book!.id}/free-links`);
+      return res.json();
+    },
+    enabled: !!book,
+    staleTime: 1000 * 60 * 60, // cache for 1 hour
+  });
+
   const rateMutation = useMutation({
     mutationFn: async (data: { bookId: number; rating: number; read: number }) =>
       apiRequest("POST", "/api/ratings", data),
@@ -591,6 +604,45 @@ function RatingModal({ book, onClose, requireAuth }: { book: BookData | null; on
           </div>
           <StarRating value={rating} onChange={setRating} />
         </div>
+
+        {/* Free ebook / audiobook links */}
+        {linksLoading ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+            <Loader2 size={12} className="animate-spin" /> Checking for free copies…
+          </div>
+        ) : (freeLinks?.ebookUrl || freeLinks?.borrowUrl || freeLinks?.iaUrl || freeLinks?.audioUrl) ? (
+          <div className="rounded-lg border border-border/40 bg-muted/20 p-3 space-y-2">
+            <p className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
+              <BookOpen size={12} className="text-primary" /> Free to Read / Listen
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {freeLinks?.ebookUrl && (
+                <a href={freeLinks.ebookUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-colors">
+                  <BookOpen size={11} /> Read Free (Open Library)
+                </a>
+              )}
+              {freeLinks?.borrowUrl && !freeLinks?.ebookUrl && (
+                <a href={freeLinks.borrowUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md bg-amber-900/20 border border-amber-700/30 text-amber-400 hover:bg-amber-900/30 transition-colors">
+                  <BookOpen size={11} /> Borrow Free (1-hour loan)
+                </a>
+              )}
+              {freeLinks?.iaUrl && !freeLinks?.ebookUrl && (
+                <a href={freeLinks.iaUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md bg-blue-900/20 border border-blue-700/30 text-blue-400 hover:bg-blue-900/30 transition-colors">
+                  <Globe size={11} /> Read on Archive.org
+                </a>
+              )}
+              {freeLinks?.audioUrl && (
+                <a href={freeLinks.audioUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md bg-purple-900/20 border border-purple-700/30 text-purple-400 hover:bg-purple-900/30 transition-colors">
+                  <Flame size={11} /> Free Audiobook (LibriVox)
+                </a>
+              )}
+            </div>
+          </div>
+        ) : null}
 
         <div className="flex gap-2 pt-2">
           <Button data-testid="save-rating" className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
