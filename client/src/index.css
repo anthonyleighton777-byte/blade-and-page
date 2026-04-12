@@ -1,0 +1,132 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Dark fantasy palette — deep midnight with ember gold accent */
+    --background: 225 20% 8%;
+    --foreground: 40 15% 88%;
+
+    --card: 225 18% 11%;
+    --card-foreground: 40 15% 88%;
+
+    --popover: 225 18% 11%;
+    --popover-foreground: 40 15% 88%;
+
+    --primary: 38 85% 55%;
+    --primary-foreground: 225 20% 8%;
+
+    --secondary: 225 15% 18%;
+    --secondary-foreground: 40 15% 75%;
+
+    --muted: 225 15% 15%;
+    --muted-foreground: 40 10% 55%;
+
+    --accent: 265 60% 55%;
+    --accent-foreground: 40 15% 95%;
+
+    --destructive: 0 65% 50%;
+    --destructive-foreground: 40 15% 95%;
+
+    --border: 225 15% 20%;
+    --input: 225 15% 18%;
+    --ring: 38 85% 55%;
+
+    --radius: 0.5rem;
+
+    /* Custom */
+    --genre-wuxia: 355 70% 50%;
+    --genre-cultivation: 265 65% 55%;
+    --genre-litrpg: 200 80% 50%;
+    --genre-urban: 38 85% 55%;
+    --genre-high-fantasy: 155 60% 40%;
+    --genre-progression: 280 55% 55%;
+  }
+
+  .dark {
+    --background: 225 20% 6%;
+    --foreground: 40 15% 88%;
+    --card: 225 18% 9%;
+    --card-foreground: 40 15% 88%;
+    --popover: 225 18% 9%;
+    --popover-foreground: 40 15% 88%;
+    --primary: 38 85% 55%;
+    --primary-foreground: 225 20% 8%;
+    --secondary: 225 15% 15%;
+    --secondary-foreground: 40 15% 75%;
+    --muted: 225 15% 12%;
+    --muted-foreground: 40 10% 50%;
+    --accent: 265 60% 55%;
+    --accent-foreground: 40 15% 95%;
+    --destructive: 0 65% 50%;
+    --destructive-foreground: 40 15% 95%;
+    --border: 225 15% 18%;
+    --input: 225 15% 15%;
+    --ring: 38 85% 55%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Satoshi', 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: hsl(var(--background)); }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--primary) / 0.5); }
+
+/* Genre badge colors */
+.genre-wuxia { background: hsl(var(--genre-wuxia) / 0.15); color: hsl(var(--genre-wuxia)); border-color: hsl(var(--genre-wuxia) / 0.3); }
+.genre-cultivation { background: hsl(var(--genre-cultivation) / 0.15); color: hsl(var(--genre-cultivation)); border-color: hsl(var(--genre-cultivation) / 0.3); }
+.genre-litrpg { background: hsl(var(--genre-litrpg) / 0.15); color: hsl(var(--genre-litrpg)); border-color: hsl(var(--genre-litrpg) / 0.3); }
+.genre-urban { background: hsl(var(--genre-urban) / 0.15); color: hsl(var(--genre-urban)); border-color: hsl(var(--genre-urban) / 0.3); }
+.genre-high_fantasy { background: hsl(var(--genre-high-fantasy) / 0.15); color: hsl(var(--genre-high-fantasy)); border-color: hsl(var(--genre-high-fantasy) / 0.3); }
+.genre-progression { background: hsl(var(--genre-progression) / 0.15); color: hsl(var(--genre-progression)); border-color: hsl(var(--genre-progression) / 0.3); }
+
+/* Rating stars animation */
+@keyframes pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.4); }
+  100% { transform: scale(1); }
+}
+.star-pop { animation: pop 0.2s ease-out; }
+
+/* Shimmer skeleton */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, hsl(var(--muted)) 25%, hsl(var(--secondary)) 50%, hsl(var(--muted)) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 0.375rem;
+}
+
+/* Book cover gradient */
+.book-cover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.book-cover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px oklch(0 0 0 / 0.4);
+}
+
+/* Read overlay */
+.read-overlay {
+  background: linear-gradient(135deg, hsl(var(--primary) / 0.12), hsl(var(--accent) / 0.08));
+  border-color: hsl(var(--primary) / 0.4) !important;
+}
+
+/* Filter pill active */
+.filter-pill-active {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
