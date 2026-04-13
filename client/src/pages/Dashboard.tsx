@@ -433,10 +433,14 @@ function BookCard({ book, onRate, onQuickRate, onSimilar, onCommunity, forYou }:
   const [expanded, setExpanded] = useState(false);
   const [hoverStar, setHoverStar] = useState(0);
   const [saving, setSaving] = useState(false);
+  const touchStartY = useRef(0);
 
   return (
     <div data-testid={`book-card-${book.id}`}
       onClick={() => onRate(book)}
+      onTouchStart={(e) => { touchStartY.current = e.touches[0].clientY; }}
+      onTouchEnd={(e) => { if (Math.abs(e.changedTouches[0].clientY - touchStartY.current) < 10) { e.preventDefault(); onRate(book); } }}
+      style={{ touchAction: "manipulation" }}
       className={`relative rounded-xl border p-4 flex gap-4 transition-all duration-200 hover:border-primary/40 hover:shadow-md cursor-pointer group ${isRead ? "read-overlay" : "bg-card border-border/50"} ${forYou ? "ring-1 ring-cyan-500/40 shadow-[0_0_12px_rgba(6,182,212,0.15)]" : ""}`}>
       {forYou && (
         <div className="absolute top-3 left-3 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-cyan-900/40 border border-cyan-600/30">
@@ -503,8 +507,16 @@ function BookCard({ book, onRate, onQuickRate, onSimilar, onCommunity, forYou }:
                 <button
                   key={i}
                   disabled={saving}
+                  style={{ touchAction: "manipulation" }}
                   className="flex-1 min-w-0 p-0 border-0 bg-transparent cursor-pointer disabled:opacity-50"
                   onMouseEnter={() => setHoverStar(i + 1)}
+                  onTouchEnd={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSaving(true);
+                    await onQuickRate(book.id, i + 1);
+                    setSaving(false);
+                  }}
                   onClick={async (e) => {
                     e.stopPropagation();
                     setSaving(true);
