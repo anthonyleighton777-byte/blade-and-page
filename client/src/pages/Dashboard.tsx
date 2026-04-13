@@ -514,13 +514,15 @@ function BookCard({ book, onRate, onQuickRate, onSimilar, onCommunity, forYou }:
                     e.preventDefault();
                     e.stopPropagation();
                     setSaving(true);
-                    await onQuickRate(book.id, i + 1);
+                    const isSameStar = book.userRating?.rating === i + 1;
+                    await onQuickRate(book.id, isSameStar ? 0 : i + 1);
                     setSaving(false);
                   }}
                   onClick={async (e) => {
                     e.stopPropagation();
                     setSaving(true);
-                    await onQuickRate(book.id, i + 1);
+                    const isSameStar = book.userRating?.rating === i + 1;
+                    await onQuickRate(book.id, isSameStar ? 0 : i + 1);
                     setSaving(false);
                   }}
                   aria-label={`Rate ${i + 1} stars`}
@@ -927,17 +929,23 @@ function RatingModal({ book, onClose, requireAuth, allBooks }: { book: BookData 
           </div>
         )}
 
-        <div className="flex gap-2 pt-2">
-          <Button data-testid="save-rating" className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
-            onClick={() => rateMutation.mutate({ bookId: book.id, rating, read: 1 })}
-            disabled={rateMutation.isPending}>
-            {rateMutation.isPending ? "Saving…" : book.userRating ? "Update Rating" : "Save Rating"}
-          </Button>
+        <div className="flex flex-col gap-2 pt-2">
+          <div className="flex gap-2">
+            <Button data-testid="save-rating" className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
+              onClick={() => rateMutation.mutate({ bookId: book.id, rating, read: 1 })}
+              disabled={rateMutation.isPending}>
+              {rateMutation.isPending ? "Saving…" : book.userRating ? "Update Rating" : "Save Rating"}
+            </Button>
+            <Button variant="outline" className="border-border/40 text-muted-foreground hover:text-foreground"
+              onClick={onClose}>
+              Cancel
+            </Button>
+          </div>
           {book.userRating && (
-            <Button data-testid="remove-rating" variant="outline"
-              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+            <Button data-testid="remove-rating" variant="ghost" size="sm"
+              className="text-xs text-muted-foreground/60 hover:text-muted-foreground w-full"
               onClick={() => removeMutation.mutate(book.id)} disabled={removeMutation.isPending}>
-              <X size={14} />
+              <X size={11} className="mr-1" /> Accidentally rated? Clear my rating (won't affect community score)
             </Button>
           )}
         </div>
@@ -1585,7 +1593,11 @@ function DashboardInner() {
                   onRate={b => { if (!user) { setShowAuthModal(true); } else { setRatingModal(b); } }}
                   onQuickRate={async (bookId, rating) => {
                     if (!user) { setShowAuthModal(true); return; }
-                    await apiRequest("POST", "/api/ratings", { bookId, rating, read: 1 });
+                    if (rating === 0) {
+                      await apiRequest("DELETE", `/api/ratings/${bookId}`);
+                    } else {
+                      await apiRequest("POST", "/api/ratings", { bookId, rating, read: 1 });
+                    }
                     queryClient.invalidateQueries({ queryKey: ["/api/books"] });
                     queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
                   }}
