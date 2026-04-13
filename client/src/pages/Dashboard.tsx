@@ -1273,6 +1273,44 @@ function DashboardInner() {
   const [showSearchOnline, setShowSearchOnline] = useState(false);
   const [discoveries, setDiscoveries] = useState<BookData[]>([]);
   const [forYouIds, setForYouIds] = useState<Set<number>>(new Set());
+
+  // Pull-to-refresh
+  const [pullY, setPullY] = useState(0);
+  const [isPulling, setIsPulling] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const pullStartY = useRef(0);
+  const PULL_THRESHOLD = 80;
+
+  const handlePullStart = (e: React.TouchEvent) => {
+    if (window.scrollY === 0) pullStartY.current = e.touches[0].clientY;
+  };
+  const handlePullMove = (e: React.TouchEvent) => {
+    if (pullStartY.current === 0) return;
+    const dist = e.touches[0].clientY - pullStartY.current;
+    if (dist > 0 && window.scrollY === 0) {
+      setIsPulling(true);
+      setPullY(Math.min(dist * 0.5, PULL_THRESHOLD));
+    }
+  };
+  const handlePullEnd = async () => {
+    if (pullY >= PULL_THRESHOLD * 0.8 && !isRefreshing) {
+      setIsRefreshing(true);
+      setPullY(0);
+      setIsPulling(false);
+      pullStartY.current = 0;
+      // Run personal discovery + refresh books
+      try {
+        await personalDiscoverMutation.mutateAsync();
+      } catch {}
+      queryClient.invalidateQueries({ queryKey: ["/api/books"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
+      setIsRefreshing(false);
+    } else {
+      setPullY(0);
+      setIsPulling(false);
+      pullStartY.current = 0;
+    }
+  };
   const [activeTab, setActiveTab] = useState<"library" | "free">("library");
   const autoDiscoveredRef = useRef(false);
 
@@ -1394,7 +1432,25 @@ function DashboardInner() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background"
+      onTouchStart={handlePullStart}
+      onTouchMove={handlePullMove}
+      onTouchEnd={handlePullEnd}>
+
+      {/* Pull-to-refresh indicator */}
+      <div className="fixed top-0 left-0 right-0 z-50 flex justify-center pointer-events-none"
+        style={{ transform: `translateY(${isPulling || isRefreshing ? pullY - 48 : -48}px)`, transition: isPulling ? "none" : "transform 0.3s ease" }}>
+        <div className={`mt-2 flex items-center gap-2 px-4 py-2 rounded-full text-xs font-medium shadow-lg border ${
+          isRefreshing ? "bg-primary text-primary-foreground border-primary/50" : "bg-card text-muted-foreground border-border/60"
+        }`}>
+          {isRefreshing
+            ? <><div className="w-3 h-3 rounded-full border-2 border-primary-foreground/40 border-t-primary-foreground animate-spin" /> Finding new books for you…</>
+            : pullY >= PULL_THRESHOLD * 0.8
+              ? <><Compass size={12} className="text-primary" /> Release to discover</>  
+              : <><Compass size={12} /> Pull to find new books</>}
+        </div>
+      </div>
+
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-border/50 bg-background/90 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">

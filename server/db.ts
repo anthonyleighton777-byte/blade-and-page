@@ -1,24 +1,25 @@
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "@shared/schema";
+import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
+import { neon } from "@neondatabase/serverless";
+import Database from "better-sqlite3";
+import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
 import path from "path";
-import fs from "fs";
 
-// On Render (and other cloud hosts), use /tmp for writable storage.
-// Locally, use the project root.
-function getDbPath() {
-  // Render sets RENDER=true in the environment
-  if (process.env.RENDER || process.env.DB_PATH) {
-    const dir = process.env.DB_PATH || "/tmp";
-    return path.join(dir, "data.db");
+function getDb() {
+  if (process.env.DATABASE_URL) {
+    const sql = neon(process.env.DATABASE_URL);
+    const db = drizzleNeon(sql, { schema });
+    console.log("[db] Using Neon Postgres (persistent)");
+    return { db, isPg: true };
+  } else {
+    const dbPath = path.join(process.cwd(), "data.db");
+    const sqlite = new Database(dbPath);
+    sqlite.pragma("journal_mode = WAL");
+    const db = drizzleSqlite(sqlite, { schema });
+    console.log(`[db] Using SQLite at: ${dbPath}`);
+    return { db, isPg: false };
   }
-  return path.join(process.cwd(), "data.db");
 }
 
-const dbPath = getDbPath();
-console.log(`[db] Using database at: ${dbPath}`);
-
-const sqlite = new Database(dbPath);
-sqlite.pragma("journal_mode = WAL");
-
-export const db = drizzle(sqlite, { schema });
+const { db, isPg } = getDb();
+export { db, isPg };

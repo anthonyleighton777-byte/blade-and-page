@@ -1,9 +1,9 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { pgTable, text, integer, serial } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const books = sqliteTable("books", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const books = pgTable("books", {
+  id: serial("id").primaryKey(),
   title: text("title").notNull(),
   author: text("author").notNull(),
   genre: text("genre").notNull(),
@@ -20,26 +20,25 @@ export const books = sqliteTable("books", {
   tags: text("tags").notNull().default("[]"), // JSON array
 });
 
-export const users = sqliteTable("users", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
   email: text("email").notNull().unique(),
-  username: text("username").notNull(), // derived from email (part before @)
+  username: text("username").notNull(),
   createdAt: integer("created_at").notNull(),
 });
 
-// Persistent tokens — survive server restarts forever
-export const userTokens = sqliteTable("user_tokens", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const userTokens = pgTable("user_tokens", {
+  id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
   token: text("token").notNull().unique(),
   createdAt: integer("created_at").notNull(),
 });
 
-export const userRatings = sqliteTable("user_ratings", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const userRatings = pgTable("user_ratings", {
+  id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
   bookId: integer("book_id").notNull(),
-  rating: integer("rating").notNull(), // 1-10
+  rating: integer("rating").notNull(),
   read: integer("read").notNull().default(1),
   notes: text("notes"),
 });

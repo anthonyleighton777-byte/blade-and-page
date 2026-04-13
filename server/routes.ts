@@ -6,9 +6,9 @@ import https from "https";
 import crypto from "crypto";
 
 // Persistent session — looks up token from DB, not memory
-function getSession(token: string | undefined): number | null {
+async function getSession(token: string | undefined): Promise<number | null> {
   if (!token) return null;
-  const user = storage.getUserByToken(token);
+  const user = await storage.getUserByToken(token);
   return user ? user.id : null;
 }
 
@@ -886,16 +886,16 @@ function buildRecommendations(allBooks: any[], ratings: any[], excludeBookIds?: 
   return scored.slice(0, 10);
 }
 
-export function registerRoutes(httpServer: any, app: Express): Server {
+export async function registerRoutes(httpServer: any, app: Express): Promise<Server> {
   // Seed on startup if empty
-  if (storage.getBooksCount() === 0) {
-    storage.seedBooks(SEED_BOOKS as any);
+  if (await storage.getBooksCount() === 0) {
+    await storage.seedBooks(SEED_BOOKS as any);
   }
 
   // ── Auth (passwordless — email only) ──────────────────────────────────────
 
   // POST /api/auth/signin — creates account if new, signs in if existing, returns permanent token
-  app.post("/api/auth/signin", (req, res) => {
+  app.post("/api/auth/signin", async (req, res) => {
     const { email } = req.body;
     const emailClean = (email || "").trim().toLowerCase();
     if (!emailClean || !/^[^@]+@[^@]+\.[^@]+$/.test(emailClean)) {
@@ -903,8 +903,8 @@ export function registerRoutes(httpServer: any, app: Express): Server {
       return;
     }
     try {
-      const user = storage.findOrCreateUserByEmail(emailClean);
-      const token = storage.createToken(user.id);
+      const user = await storage.findOrCreateUserByEmail(emailClean);
+      const token = await storage.createToken(user.id);
       res.json({ token, userId: user.id, username: user.username });
     } catch (e: any) {
       res.status(500).json({ error: "Sign in failed." });
@@ -912,11 +912,11 @@ export function registerRoutes(httpServer: any, app: Express): Server {
   });
 
   // GET /api/auth/me — validate persistent token
-  app.get("/api/auth/me", (req, res) => {
+  app.get("/api/auth/me", async (req, res) => {
     const token = req.headers.authorization?.replace("Bearer ", "");
-    const userId = getSession(token);
+    const userId = await getSession(token);
     if (!userId) { res.status(401).json({ error: "Not authenticated" }); return; }
-    const user = storage.getUserById(userId);
+    const user = await storage.getUserById(userId);
     if (!user) { res.status(401).json({ error: "User not found" }); return; }
     res.json({ userId: user.id, username: user.username });
   });
@@ -928,12 +928,12 @@ export function registerRoutes(httpServer: any, app: Express): Server {
   // ── Books ──────────────────────────────────────────────────────────────────
 
   // GET /api/books — returns books with community avg rating + current user's rating
-  app.get("/api/books", (req, res) => {
+  app.get("/api/books", async (req, res) => {
     const token = req.headers.authorization?.replace("Bearer ", "");
-    const userId = getSession(token);
+    const userId = await getSession(token);
 
-    const allBooks = storage.getAllBooks();
-    const allRatings = storage.getAllRatings();
+    const allBooks = await storage.getAllBooks();
+    const allRatings = await storage.getAllRatings();
 
     // Build community avg map: bookId → { avg, count, raters: [{username, rating}] }
     const communityMap = new Map<number, { total: number; count: number; raters: { userId: number; rating: number }[] }>();
@@ -948,24 +948,24 @@ export function registerRoutes(httpServer: any, app: Express): Server {
     // Build per-user rating map for current user
     const myRatingMap = new Map<number, any>();
     if (userId) {
-      const myRatings = storage.getUserRatings(userId);
+      const myRatings = await storage.getUserRatings(userId);
       for (const r of myRatings) myRatingMap.set(r.bookId, r);
     }
 
     // Resolve usernames for community raters
     const usernameCache = new Map<number, string>();
-    const getUsername = (uid: number) => {
+    const getUsername = async (uid: number) => {
       if (!usernameCache.has(uid)) {
-        usernameCache.set(uid, storage.getUserById(uid)?.username ?? "Unknown");
+        usernameCache.set(uid, (await storage.getUserById(uid))?.username ?? "Unknown");
       }
       return usernameCache.get(uid)!;
     };
 
-    const result = allBooks.map((b) => {
+    const result = await Promise.all(allBooks.map(async (b) => {
       const comm = communityMap.get(b.id);
       const communityRating = comm
         ? { avg: Math.round((comm.total / comm.count) * 10) / 10, count: comm.count,
-            raters: comm.raters.map((r) => ({ username: getUsername(r.userId), rating: r.rating })) }
+            raters: await Promise.all(comm.raters.map(async (r) => ({ username: await getUsername(r.userId), rating: r.rating }))) }
         : null;
       return {
         ...b,
@@ -974,63 +974,63 @@ export function registerRoutes(httpServer: any, app: Express): Server {
         userRating: myRatingMap.get(b.id) || null,
         communityRating,
       };
-    });
+    }));
     res.json(result);
   });
 
   // POST /api/books — add a user-found book
-  app.post("/api/books", (req, res) => {
+  app.post("/api/books", async (req, res) => {
     const parsed = insertBookSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: parsed.error }); return; }
-    const book = storage.addBook(parsed.data);
+    const book = await storage.addBook(parsed.data);
     res.json(book);
   });
 
   // ── Ratings ────────────────────────────────────────────────────────────────
 
   // POST /api/ratings — upsert rating for authenticated user
-  app.post("/api/ratings", (req, res) => {
+  app.post("/api/ratings", async (req, res) => {
     const token = req.headers.authorization?.replace("Bearer ", "");
-    const userId = getSession(token);
+    const userId = await getSession(token);
     if (!userId) { res.status(401).json({ error: "Not authenticated" }); return; }
 
     const { bookId, rating, notes } = req.body;
     const parsed = insertRatingSchema.safeParse({ userId, bookId, rating, notes, read: 1 });
     if (!parsed.success) { res.status(400).json({ error: parsed.error }); return; }
-    const result = storage.upsertRating(parsed.data);
+    const result = await storage.upsertRating(parsed.data);
     res.json(result);
   });
 
   // DELETE /api/ratings/:bookId
-  app.delete("/api/ratings/:bookId", (req, res) => {
+  app.delete("/api/ratings/:bookId", async (req, res) => {
     const token = req.headers.authorization?.replace("Bearer ", "");
-    const userId = getSession(token);
+    const userId = await getSession(token);
     if (!userId) { res.status(401).json({ error: "Not authenticated" }); return; }
-    storage.deleteRating(userId, parseInt(req.params.bookId));
+    await storage.deleteRating(userId, parseInt(req.params.bookId));
     res.json({ success: true });
   });
 
   // ── Recommendations (community-pooled) ─────────────────────────────────────
 
   // GET /api/recommendations — powered by ALL users' ratings combined
-  app.get("/api/recommendations", (req, res) => {
+  app.get("/api/recommendations", async (req, res) => {
     const token = req.headers.authorization?.replace("Bearer ", "");
-    const userId = getSession(token);
-    const allBooks = storage.getAllBooks();
-    const allRatings = storage.getAllRatings();
+    const userId = await getSession(token);
+    const allBooks = await storage.getAllBooks();
+    const allRatings = await storage.getAllRatings();
 
     // Exclude books the current user has already read
     const myReadIds = userId
-      ? new Set(storage.getUserRatings(userId).map((r) => r.bookId))
+      ? new Set((await storage.getUserRatings(userId)).map((r) => r.bookId))
       : new Set<number>();
 
     res.json(buildRecommendations(allBooks, allRatings, myReadIds));
   });
 
   // GET /api/similar/:bookId
-  app.get("/api/similar/:bookId", (req, res) => {
+  app.get("/api/similar/:bookId", async (req, res) => {
     const bookId = parseInt(req.params.bookId);
-    const allBooks = storage.getAllBooks();
+    const allBooks = await storage.getAllBooks();
     const sourceBook = allBooks.find((b) => b.id === bookId);
     if (!sourceBook) { res.status(404).json({ error: "Book not found" }); return; }
 
@@ -1114,13 +1114,13 @@ export function registerRoutes(httpServer: any, app: Express): Server {
     score += (profile.genreScores[genre] || 0) * 3;
     return { doc, genre, tags, subjects, score };
   }
-  function addDiscoveredBook(doc: any, genre: string, tags: string[], subjects: string[]): any {
+  async function addDiscoveredBook(doc: any, genre: string, tags: string[], subjects: string[]): Promise<any> {
     const [coverColor, coverAccent] = coverColors(genre);
     const s = subjects.join(" ").toLowerCase();
     const martialArtsScore = s.includes("martial") || s.includes("combat") || s.includes("fighting") ? 4 : 2;
     const magicScore = s.includes("magic") || s.includes("fantasy") || s.includes("power") ? 4 : 2;
     const characterScore = s.includes("character") || s.includes("coming of age") || s.includes("growth") ? 4 : 3;
-    const book = storage.addBook({
+    const book = await storage.addBook({
       title: doc.title,
       author: (doc.author_name || ["Unknown Author"])[0],
       genre,
@@ -1179,9 +1179,9 @@ export function registerRoutes(httpServer: any, app: Express): Server {
   }
 
   // ── GET /api/discover/group — community taste profile → discover new books ──
-  app.get("/api/discover/group", (req, res) => {
-    const allBooks = storage.getAllBooks();
-    const allRatings = storage.getAllRatings();
+  app.get("/api/discover/group", async (req, res) => {
+    const allBooks = await storage.getAllBooks();
+    const allRatings = await storage.getAllRatings();
     if (allRatings.length < 3) {
       res.json({ added: [], personalPicks: [], message: "Need at least 3 community ratings." });
       return;
@@ -1189,19 +1189,21 @@ export function registerRoutes(httpServer: any, app: Express): Server {
     const profile = buildTasteProfile(allRatings, allBooks);
     const existingTitles = new Set(allBooks.map((b: any) => b.title.toLowerCase().trim()));
     runDiscovery(profile, existingTitles, 5, (added, queries, prof) => {
-      res.json({ added, queriesUsed: queries, tasteProfile: { topTags: prof.topTags, topGenres: prof.topGenres } });
+      Promise.all(added.map((b: any) => storage.addBook(b))).then(() => {
+        res.json({ added, queriesUsed: queries, tasteProfile: { topTags: prof.topTags, topGenres: prof.topGenres } });
+      }).catch(() => res.json({ added: [], queriesUsed: queries, tasteProfile: { topTags: prof.topTags, topGenres: prof.topGenres } }));
     });
   });
 
   // ── GET /api/discover/personal — YOUR taste profile → discover + recommend ──
   // Returns: { added (new books from Open Library), forYouIds (existing book IDs matching your taste) }
-  app.get("/api/discover/personal", (req, res) => {
+  app.get("/api/discover/personal", async (req, res) => {
     const token = req.headers.authorization?.replace("Bearer ", "");
-    const userId = getSession(token);
+    const userId = await getSession(token);
     if (!userId) { res.json({ added: [], forYouIds: [], message: "Sign in to get personal picks." }); return; }
 
-    const allBooks = storage.getAllBooks();
-    const myRatings = storage.getUserRatings(userId);
+    const allBooks = await storage.getAllBooks();
+    const myRatings = await storage.getUserRatings(userId);
     if (myRatings.length < 2) {
       res.json({ added: [], forYouIds: [], message: "Rate at least 2 books for personal discovery." });
       return;
@@ -1282,8 +1284,8 @@ export function registerRoutes(httpServer: any, app: Express): Server {
   }
 
   // ── GET /api/free-books — bulk scan all books for free availability ──
-  app.get("/api/free-books", (req, res) => {
-    const allBooks = storage.getAllBooks();
+  app.get("/api/free-books", async (req, res) => {
+    const allBooks = await storage.getAllBooks();
 
     function checkBook(book: any): Promise<any> {
       return new Promise((resolve) => {
@@ -1381,8 +1383,8 @@ export function registerRoutes(httpServer: any, app: Express): Server {
   });
 
   // ── GET /api/books/:id/free-links — check Open Library availability + LibriVox ──
-  app.get("/api/books/:id/free-links", (req, res) => {
-    const book = storage.getBook(Number(req.params.id));
+  app.get("/api/books/:id/free-links", async (req, res) => {
+    const book = await storage.getBook(Number(req.params.id));
     if (!book) { res.status(404).json({ error: "Book not found" }); return; }
 
     const title = book.title;
